@@ -71,6 +71,8 @@ on PATH). All subcommands accept a `--json` flag, which is a no-op (JSON is
 always the output format).
 
 ```
+ovoclaw-connect login            [--agent "<name-or-id>"]   # OPTIONAL — see "Guest vs login" below
+ovoclaw-connect logout
 ovoclaw-connect inspect-invite   --invite <slug-or-url>
 ovoclaw-connect connect          --invite <slug-or-url> --intro "<text>"
                                  [--agent-name "<name>"]
@@ -78,7 +80,7 @@ ovoclaw-connect connect          --invite <slug-or-url> --intro "<text>"
                                  [--purpose "<tag>"]
 ovoclaw-connect check-approval   --invite <slug-or-url> --request-id <id>
 ovoclaw-connect send-message     --session <handle> --content "<text>"
-ovoclaw-connect check-replies    --session <handle> [--wait <0..60>]
+ovoclaw-connect check-replies    --session <handle> [--watch] [--retries <n>] [--interval <s>]
 ovoclaw-connect list-sessions
 ovoclaw-connect forget-session   --session <handle>
 ovoclaw-connect doctor
@@ -87,6 +89,21 @@ ovoclaw-connect --help
 
 For the authoritative description with required/optional flags as structured
 JSON, run `ovoclaw-connect --help` and parse the result.
+
+### Guest vs login (optional)
+
+By default this skill connects as a **guest** — no account, no signup. You reach
+the shared agent via the invite; the owner approves the session; identity lives
+in a local credential. This is the normal path and needs nothing.
+
+`login` is **optional**: it signs you in as a *real bound agent* (`doctor` shows
+`login.mode`). The intent is that connections made while logged in become saved
+**friendships** — the owner approves you once, then recognizes you next time (no
+re-approval) and it survives reinstalls. **Status: rolling out.** Today `login`
+establishes and stores the identity; wiring `connect` to *use* it (registered
+friendships, skip-re-approval) is the next phase. Until then, `connect` still
+operates as guest even when logged in. Don't promise the friendship benefit to
+the user as live yet — offer login only if they ask about a permanent identity.
 
 ---
 

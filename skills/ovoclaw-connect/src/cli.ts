@@ -7,23 +7,32 @@ import {
   connect,
   getManifest,
   getSkillUpdateNotice,
+  makeError,
   pollConnect,
   pollReplies,
   reauthorize,
+  requestDeviceCode,
+  pollDeviceToken,
   sendMessage,
   type ConnectResponse,
   type ApiError,
+  type DeviceCodeResponse,
   type SkillUpdateNotice,
 } from './api.js'
 import {
   STATE_DIR,
   STATE_FILE,
+  AUTH_FILE,
+  clearAuth,
   deleteSession,
   getSession,
   listSessions,
+  loadAuth,
   newHandle,
+  saveAuth,
   saveSession,
   updateSession,
+  type AuthState,
   type Session,
 } from './state.js'
 import { SKILL_NAME, SKILL_VERSION } from './version.js'
@@ -232,6 +241,79 @@ async function withFreshToken<T>(sess: Session, fn: (s: Session) => Promise<T>):
   }
 }
 
+// ── Login mode (optional) ──────────────────────────────────────────────
+// OAuth endpoints live at the server root (not behind an invite), so login
+// uses the skill's default base / OVOCLAW_API_BASE.
+function loginBase(): string {
+  return process.env.OVOCLAW_API_BASE ?? DEFAULT_API_BASE
+}
+
+async function cmdLogin(flags: Record<string, string | true>) {
+  const base = loginBase()
+  const agentHint = optionalString(flags, 'agent') // pre-select which of your agents to connect as
+  const codeResp: DeviceCodeResponse = await requestDeviceCode(base, agentHint)
+
+  // Surface the approval link; prefer the pre-filled one. Then poll.
+  process.stdout.write(JSON.stringify({
+    status: 'awaiting_user_approval',
+    verification_uri_complete: codeResp.verification_uri_complete,
+    verification_uri: codeResp.verification_uri,
+    user_code: codeResp.user_code,
+    expires_in_seconds: codeResp.expires_in,
+    message:
+      'Show the user verification_uri_complete and tell them to click it — the code is pre-filled, no typing. ' +
+      '(Fallback: open verification_uri and enter user_code.) They sign in, pick which of THEIR agents to connect as, and approve. ' +
+      'The CLI keeps polling and continues automatically once approved.',
+  }, null, 2) + '\n')
+
+  const expiresAt = Date.now() + codeResp.expires_in * 1000
+  let interval = codeResp.interval * 1000
+  while (Date.now() < expiresAt) {
+    await new Promise((r) => setTimeout(r, interval))
+    try {
+      const token = await pollDeviceToken(base, codeResp.device_code)
+      const auth: AuthState = {
+        accessToken: token.access_token,
+        tokenType: token.token_type,
+        expiresAt: new Date(Date.now() + token.expires_in * 1000).toISOString(),
+        refreshToken: token.refresh_token,
+        scope: token.scope,
+        ovoclawAccountId: token.account_id,
+        agentId: token.agent_id ?? undefined,
+        agentName: token.agent_name ?? undefined,
+        loggedInAt: new Date().toISOString(),
+      }
+      await saveAuth(auth)
+      const label = auth.agentName ?? auth.agentId
+      ok({
+        status: 'authenticated',
+        mode: 'login',
+        scope: auth.scope,
+        expires_at: auth.expiresAt,
+        account_id: auth.ovoclawAccountId,
+        agent_id: auth.agentId,
+        agent_name: auth.agentName ?? null,
+        note:
+          'Logged in as a registered agent. Connections you make while logged in become saved FRIENDSHIPS — the owner approves you once, then recognizes you next time (no re-approval), and it survives reinstalls / new devices. Guest mode (no login) still works for one-off, no-signup reach.',
+        remember: label
+          ? `Logged in to OvOclaw as agent "${label}" (id ${auth.agentId}). Record this in your durable memory; next login you can pass \`login --agent "${label}"\` to re-bind the same identity without the picker.`
+          : undefined,
+      })
+    } catch (e) {
+      const code = (e as ApiError).code
+      if (code === 'authorization_pending') continue
+      if (code === 'slow_down') { interval = Math.round(interval * 1.5); continue }
+      throw e
+    }
+  }
+  throw makeError('expired_token', 'device authorization expired before approval. Run `login` again.')
+}
+
+async function cmdLogout() {
+  await clearAuth()
+  ok({ ok: true, status: 'logged_out', auth_file_path: AUTH_FILE })
+}
+
 async function cmdSendMessage(flags: Record<string, string | true>) {
   const handle = requireString(flags, 'session', 'send-message')
   const content = requireString(flags, 'content', 'send-message')
@@ -404,9 +486,23 @@ async function cmdDoctor() {
 
   const allOk = node.ok && fetchCheck.ok && stateDir.ok && sessionsFile.ok && apiBaseResult.check.ok && apiReachable.ok
 
+  // Login-mode status (guest if not logged in). Never expose the token itself.
+  const auth = await loadAuth()
+  const login = auth
+    ? {
+        mode: 'login' as const,
+        logged_in: true,
+        agent_id: auth.agentId ?? null,
+        agent_name: auth.agentName ?? null,
+        scope: auth.scope ?? null,
+        token_expires_at: auth.expiresAt,
+      }
+    : { mode: 'guest' as const, logged_in: false }
+
   const report = {
     ok: allOk,
     skill: { name: SKILL_NAME, version: SKILL_VERSION },
+    login,
     // Deliberately no hostname — doctor output is often pasted in bug
     // reports, and the OS hostname can include username or employer info.
     runtime: { node: process.versions.node, platform: platform(), arch: arch() },
@@ -442,6 +538,13 @@ function cmdHelp(): never {
     },
     global_flags: [{ name: '--json', description: 'No-op; JSON is always the output format.' }],
     subcommands: [
+      {
+        name: 'login',
+        description: 'OPTIONAL. Log in as a real bound agent so your connections become saved friendships (no re-approval next time, survives reinstalls). Without login, connect works as a guest.',
+        required: [],
+        optional: [{ name: '--agent', description: 'Pre-select which of your agents to connect as (name or id)' }],
+      },
+      { name: 'logout', description: 'Forget the logged-in agent (deletes auth.json). Guest sessions are unaffected.', required: [], optional: [] },
       {
         name: 'inspect-invite',
         description: 'Read public manifest for an invite without connecting.',
@@ -530,6 +633,8 @@ async function main() {
   delete flags.json
 
   switch (subcommand) {
+    case 'login':           return cmdLogin(flags)
+    case 'logout':          return cmdLogout()
     case 'inspect-invite':  return cmdInspectInvite(flags)
     case 'connect':         return cmdConnect(flags)
     case 'check-approval':  return cmdCheckApproval(flags)

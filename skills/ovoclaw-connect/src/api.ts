@@ -93,6 +93,13 @@ export type ApiErrorCode =
   | 'agent_busy'         // 409 agent_busy / queue_full
   | 'invalid_request'    // 400 client error (schema, missing fields)
   | 'server_error'       // 5xx
+  // Login-mode (device-flow) codes:
+  | 'authorization_pending' // 401: user hasn't approved the device yet (keep polling)
+  | 'slow_down'             // 401: polling too fast (back off)
+  | 'access_denied'         // 401: user denied the device approval
+  | 'expired_token'         // 401: device code expired before approval
+  | 'not_authenticated'     // CLI: no auth.json / not logged in
+  | 'server_not_ready'      // 404 on /oauth/*: server doesn't support login mode yet
   | 'unknown'
 
 export interface ApiError extends Error {
@@ -101,7 +108,7 @@ export interface ApiError extends Error {
   body?: unknown
 }
 
-function makeError(code: ApiErrorCode, message: string, extras: { status?: number; body?: unknown } = {}): ApiError {
+export function makeError(code: ApiErrorCode, message: string, extras: { status?: number; body?: unknown } = {}): ApiError {
   const err = new Error(message) as ApiError
   err.code = code
   if (extras.status !== undefined) err.status = extras.status
@@ -301,5 +308,99 @@ export async function pollReplies(
   return jsonFetch<PollRepliesResponse>(`${host}/poll?${params.toString()}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
+  })
+}
+
+// ── Login mode: OAuth device flow ─────────────────────────────────────────
+// The connector can OPTIONALLY log in as a real bound agent (scope
+// `agent:connect`), which makes the connection a registered friendship instead
+// of a guest session. Reuses the same /oauth/* endpoints the share skill uses.
+// See docs/login-mode-design.md.
+
+export const CONNECT_CLIENT_ID = 'ovoclaw-connect-cli'
+export const CONNECT_SCOPE = 'agent:connect'
+const DEVICE_CODE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
+
+export interface DeviceCodeResponse {
+  device_code: string
+  user_code: string
+  verification_uri: string
+  verification_uri_complete?: string
+  expires_in: number
+  interval: number
+}
+
+export interface DeviceTokenResponse {
+  access_token: string
+  token_type: string
+  expires_in: number
+  refresh_token?: string
+  scope?: string
+  account_id?: string
+  agent_id?: string | null
+  agent_name?: string | null
+}
+
+// OAuth endpoints answer with { error, message } and (for the device-flow
+// poll) carry their state in `error` at HTTP 401. Map those to our codes; a
+// 404 means the server predates login mode.
+const OAUTH_ERROR_CODES: Record<string, ApiErrorCode> = {
+  authorization_pending: 'authorization_pending',
+  slow_down: 'slow_down',
+  access_denied: 'access_denied',
+  expired_token: 'expired_token',
+  invalid_grant: 'expired_token',
+}
+
+async function oauthFetch<T>(base: string, path: string, body: Record<string, unknown>): Promise<T> {
+  const url = `${base}${path}`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Ovoclaw-Connect-Version': SKILL_VERSION },
+      body: JSON.stringify(body),
+    })
+  } catch (e) {
+    const cause = (e as Error & { cause?: { code?: string; message?: string } }).cause
+    const reason = cause?.code || cause?.message || (e as Error).message || 'fetch failed'
+    throw makeError('network_error', `network_error: ${reason}`)
+  }
+  captureUpdateHeaders(res)
+  const text = await res.text()
+  let payload: { error?: string; message?: string; [k: string]: unknown }
+  try { payload = text ? JSON.parse(text) : {} } catch { payload = { raw: text } as never }
+
+  if (res.status === 404) {
+    throw makeError('server_not_ready', 'login: the server does not expose the OAuth device-flow endpoints (HTTP 404) — it may not support login mode yet.', { status: 404, body: payload })
+  }
+  if (!res.ok) {
+    const oauth = payload.error ? OAUTH_ERROR_CODES[payload.error] : undefined
+    const code = oauth ?? classifyStatus(res.status, payload)
+    const msg = payload.message || payload.error || res.statusText
+    throw makeError(code, `${code} (HTTP ${res.status}): ${msg}`, { status: res.status, body: payload })
+  }
+  return payload as T
+}
+
+export async function requestDeviceCode(base: string, agentHint?: string): Promise<DeviceCodeResponse> {
+  const body: Record<string, unknown> = { client_id: CONNECT_CLIENT_ID, scope: CONNECT_SCOPE }
+  if (agentHint) body.agent_hint = agentHint
+  return oauthFetch<DeviceCodeResponse>(base, '/oauth/device/code', body)
+}
+
+export async function pollDeviceToken(base: string, deviceCode: string): Promise<DeviceTokenResponse> {
+  return oauthFetch<DeviceTokenResponse>(base, '/oauth/device/token', {
+    grant_type: DEVICE_CODE_GRANT,
+    device_code: deviceCode,
+    client_id: CONNECT_CLIENT_ID,
+  })
+}
+
+export async function refreshAccessToken(base: string, refreshToken: string): Promise<DeviceTokenResponse> {
+  return oauthFetch<DeviceTokenResponse>(base, '/oauth/token', {
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: CONNECT_CLIENT_ID,
   })
 }

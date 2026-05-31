@@ -1,5 +1,5 @@
 import { SKILL_VERSION } from './version.js';
-function makeError(code, message, extras = {}) {
+export function makeError(code, message, extras = {}) {
     const err = new Error(message);
     err.code = code;
     if (extras.status !== undefined)
@@ -157,5 +157,78 @@ export async function pollReplies(host, token, sinceSeq, waitSeconds = 0) {
     return jsonFetch(`${host}/poll?${params.toString()}`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
+    });
+}
+// ── Login mode: OAuth device flow ─────────────────────────────────────────
+// The connector can OPTIONALLY log in as a real bound agent (scope
+// `agent:connect`), which makes the connection a registered friendship instead
+// of a guest session. Reuses the same /oauth/* endpoints the share skill uses.
+// See docs/login-mode-design.md.
+export const CONNECT_CLIENT_ID = 'ovoclaw-connect-cli';
+export const CONNECT_SCOPE = 'agent:connect';
+const DEVICE_CODE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
+// OAuth endpoints answer with { error, message } and (for the device-flow
+// poll) carry their state in `error` at HTTP 401. Map those to our codes; a
+// 404 means the server predates login mode.
+const OAUTH_ERROR_CODES = {
+    authorization_pending: 'authorization_pending',
+    slow_down: 'slow_down',
+    access_denied: 'access_denied',
+    expired_token: 'expired_token',
+    invalid_grant: 'expired_token',
+};
+async function oauthFetch(base, path, body) {
+    const url = `${base}${path}`;
+    let res;
+    try {
+        res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Ovoclaw-Connect-Version': SKILL_VERSION },
+            body: JSON.stringify(body),
+        });
+    }
+    catch (e) {
+        const cause = e.cause;
+        const reason = cause?.code || cause?.message || e.message || 'fetch failed';
+        throw makeError('network_error', `network_error: ${reason}`);
+    }
+    captureUpdateHeaders(res);
+    const text = await res.text();
+    let payload;
+    try {
+        payload = text ? JSON.parse(text) : {};
+    }
+    catch {
+        payload = { raw: text };
+    }
+    if (res.status === 404) {
+        throw makeError('server_not_ready', 'login: the server does not expose the OAuth device-flow endpoints (HTTP 404) — it may not support login mode yet.', { status: 404, body: payload });
+    }
+    if (!res.ok) {
+        const oauth = payload.error ? OAUTH_ERROR_CODES[payload.error] : undefined;
+        const code = oauth ?? classifyStatus(res.status, payload);
+        const msg = payload.message || payload.error || res.statusText;
+        throw makeError(code, `${code} (HTTP ${res.status}): ${msg}`, { status: res.status, body: payload });
+    }
+    return payload;
+}
+export async function requestDeviceCode(base, agentHint) {
+    const body = { client_id: CONNECT_CLIENT_ID, scope: CONNECT_SCOPE };
+    if (agentHint)
+        body.agent_hint = agentHint;
+    return oauthFetch(base, '/oauth/device/code', body);
+}
+export async function pollDeviceToken(base, deviceCode) {
+    return oauthFetch(base, '/oauth/device/token', {
+        grant_type: DEVICE_CODE_GRANT,
+        device_code: deviceCode,
+        client_id: CONNECT_CLIENT_ID,
+    });
+}
+export async function refreshAccessToken(base, refreshToken) {
+    return oauthFetch(base, '/oauth/token', {
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: CONNECT_CLIENT_ID,
     });
 }

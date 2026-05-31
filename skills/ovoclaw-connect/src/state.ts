@@ -109,3 +109,76 @@ export async function updateSession(
 export function newHandle(): string {
   return 's_' + randomBytes(8).toString('hex')
 }
+
+// ── Login-mode auth (registered connector) ────────────────────────────────
+// Optional: present only when the user runs `login`. Guest mode never touches
+// this. Stored separately from sessions.json. Mirrors the share skill's backup
+// + self-heal so a skill update / corruption never forces a re-login.
+export const AUTH_FILE = join(STATE_DIR, 'auth.json')
+export const AUTH_BACKUP_FILE = join(STATE_DIR, 'auth.json.bak')
+
+export interface AuthState {
+  accessToken: string
+  tokenType: string
+  expiresAt: string       // ISO 8601
+  refreshToken?: string
+  scope?: string
+  ovoclawAccountId?: string
+  agentId?: string
+  agentName?: string
+  loggedInAt: string      // ISO 8601
+}
+
+async function readAuthFrom(path: string): Promise<AuthState | null> {
+  let raw: string
+  try {
+    raw = await fs.readFile(path, 'utf8')
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw e
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed === 'object' && parsed !== null && typeof (parsed as AuthState).accessToken === 'string') {
+      return parsed as AuthState
+    }
+  } catch {
+    // corrupt JSON — fall through so the caller can try the backup
+  }
+  return null
+}
+
+export async function loadAuth(): Promise<AuthState | null> {
+  const primary = await readAuthFrom(AUTH_FILE)
+  if (primary) return primary
+  const backup = await readAuthFrom(AUTH_BACKUP_FILE)
+  if (backup) {
+    try { await saveAuth(backup) } catch { /* restore is best-effort */ }
+    return backup
+  }
+  return null
+}
+
+export async function saveAuth(auth: AuthState): Promise<void> {
+  await fs.mkdir(DIR, { recursive: true, mode: 0o700 })
+  try { await fs.chmod(DIR, 0o700) } catch {}
+  const json = JSON.stringify(auth, null, 2)
+  await fs.writeFile(AUTH_FILE, json, { mode: 0o600 })
+  try { await fs.chmod(AUTH_FILE, 0o600) } catch {}
+  // Mirror to the backup so a lost/corrupt auth.json can self-heal on next load.
+  try {
+    await fs.writeFile(AUTH_BACKUP_FILE, json, { mode: 0o600 })
+    try { await fs.chmod(AUTH_BACKUP_FILE, 0o600) } catch {}
+  } catch { /* best-effort */ }
+}
+
+export async function clearAuth(): Promise<void> {
+  // Remove BOTH files so logout sticks (loadAuth would otherwise self-restore).
+  for (const f of [AUTH_FILE, AUTH_BACKUP_FILE]) {
+    try {
+      await fs.unlink(f)
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
+    }
+  }
+}

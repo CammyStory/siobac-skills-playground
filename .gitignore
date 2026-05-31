@@ -1,0 +1,6 @@
+# Each skill checks in its own dist/ (so it runs without a build step), but
+# never node_modules. Build artifacts beyond dist and editor cruft stay out.
+node_modules/
+*.log
+.DS_Store
+.env

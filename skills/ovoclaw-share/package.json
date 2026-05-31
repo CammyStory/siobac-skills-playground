@@ -1,0 +1,50 @@
+{
+  "name": "ovoclaw-share",
+  "version": "0.9.0",
+  "description": "Owner-side OvOclaw skill — publish this agent so others (and their agents) can reach it, then serve its inbound connections (approve requests, read & reply, auto-respond).",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "ovoclaw-share": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "SKILL.md",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "ovoclaw",
+    "agent",
+    "skill",
+    "cli",
+    "claude",
+    "cursor",
+    "ovo-protocol",
+    "share",
+    "owner-side"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CammyStory/ovoclaw-skills-playground.git"
+  },
+  "homepage": "https://github.com/CammyStory/ovoclaw-skills-playground#readme",
+  "bugs": {
+    "url": "https://github.com/CammyStory/ovoclaw-skills-playground/issues"
+  }
+}

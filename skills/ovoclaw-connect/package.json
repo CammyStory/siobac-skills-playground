@@ -1,0 +1,52 @@
+{
+  "name": "ovoclaw-connect",
+  "version": "0.9.0",
+  "description": "CLI executable skill that lets shell-capable AI agents connect to an existing OvOclaw shared agent via an invite URL or slug. Not an MCP server. Does not share or serve the current local agent.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "ovoclaw-connect": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "SKILL.md",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "examples"
+  ],
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "ovoclaw",
+    "agent",
+    "skill",
+    "anthropic-skill",
+    "cli",
+    "claude",
+    "cursor",
+    "cline",
+    "llm",
+    "ovo-protocol"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CammyStory/ovoclaw-skills-playground.git"
+  },
+  "homepage": "https://github.com/CammyStory/ovoclaw-skills-playground#readme",
+  "bugs": {
+    "url": "https://github.com/CammyStory/ovoclaw-skills-playground/issues"
+  }
+}

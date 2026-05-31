@@ -1,0 +1,481 @@
+#!/usr/bin/env node
+import { promises as fs, constants as fsConstants } from 'node:fs'
+import { platform, arch } from 'node:os'
+import { parseArgs, requireString, optionalString, optionalInt, CliError } from './argparse.js'
+import { parseInvite } from './invite.js'
+import {
+  connect,
+  getManifest,
+  pollConnect,
+  pollReplies,
+  reauthorize,
+  sendMessage,
+  type ConnectResponse,
+  type ApiError,
+} from './api.js'
+import {
+  STATE_DIR,
+  STATE_FILE,
+  deleteSession,
+  getSession,
+  listSessions,
+  newHandle,
+  saveSession,
+  updateSession,
+  type Session,
+} from './state.js'
+
+const SKILL_NAME = 'ovoclaw-connect'
+const SKILL_VERSION = '0.9.0'
+const DEFAULT_API_BASE = 'https://ovo.ovoclaw.com'
+
+// ── Output contract ────────────────────────────────────────────────────
+// Every successful invocation prints exactly ONE JSON object to stdout
+// and exits 0. Every failed invocation prints exactly ONE JSON object to
+// stderr and exits non-zero. No banners, no decorative text, no progress
+// logging. The consumer is an LLM; stable machine-readable output is the
+// whole point of this CLI.
+
+function ok(value: unknown): never {
+  process.stdout.write(JSON.stringify(value, null, 2) + '\n')
+  process.exit(0)
+}
+
+function fail(err: unknown, exitCode = 1): never {
+  let body: Record<string, unknown>
+  if (err instanceof CliError) {
+    body = { error: err.message, code: 'cli_error' }
+  } else if (err instanceof Error) {
+    const apiErr = err as ApiError
+    // Default to 'unknown' so every failure JSON includes a machine-readable
+    // `code` — SKILL.md tells agents to branch on `code`, never on the English
+    // message, so this field must always be present.
+    body = { error: err.message, code: apiErr.code ?? 'unknown' }
+    if (typeof apiErr.status === 'number') body.status = apiErr.status
+    if (apiErr.body !== undefined) body.details = apiErr.body
+  } else {
+    body = { error: String(err), code: 'unknown' }
+  }
+  process.stderr.write(JSON.stringify(body, null, 2) + '\n')
+  process.exit(exitCode)
+}
+
+async function persistFromConnect(res: ConnectResponse, slug: string, host: string): Promise<Session> {
+  if (!res.token || !res.token_expires_at || !res.your_user_id || !res.client_secret) {
+    throw new Error(
+      `ovoclaw-connect connect succeeded but response missing token fields: ${JSON.stringify(res)}`,
+    )
+  }
+  const session: Session = {
+    handle: newHandle(),
+    slug,
+    host,
+    peerAgentName: res.peer_name,
+    token: res.token,
+    tokenExpiresAt: res.token_expires_at,
+    clientUserId: res.your_user_id,
+    clientSecret: res.client_secret,
+    conversationId: res.conversation_id,
+    lastSeq: 0,
+    createdAt: new Date().toISOString(),
+  }
+  await saveSession(session)
+  return session
+}
+
+// ── Subcommand handlers ───────────────────────────────────────────────
+
+async function cmdInspectInvite(flags: Record<string, string | true>) {
+  const invite = requireString(flags, 'invite', 'inspect-invite')
+  const { slug, host } = parseInvite(invite)
+  const m = await getManifest(host, slug)
+  ok({
+    host,
+    slug,
+    agent: m.agent,
+    requires_approval: m.requires_approval ?? false,
+    protocol: m.ovo_protocol,
+  })
+}
+
+async function cmdConnect(flags: Record<string, string | true>) {
+  const invite = requireString(flags, 'invite', 'connect')
+  const introduction = requireString(flags, 'intro', 'connect')
+  const your_agent_name = optionalString(flags, 'agent-name')
+  const your_owner_name = optionalString(flags, 'owner-name')
+  const purpose_hint = optionalString(flags, 'purpose')
+
+  const { slug, host } = parseInvite(invite)
+  const res = await connect(host, slug, {
+    your_agent_name,
+    your_owner_name,
+    introduction,
+    purpose_hint,
+  })
+
+  if (res.status === 'active' || res.status === 'reauthorized' || res.status === 'already_connected') {
+    const session = await persistFromConnect(res, slug, host)
+    ok({
+      status: res.status,
+      session_handle: session.handle,
+      peer_name: session.peerAgentName,
+      token_expires_at: session.tokenExpiresAt,
+    })
+  }
+
+  if (res.status === 'awaiting_approval') {
+    ok({
+      status: 'awaiting_approval',
+      request_id: res.request_id,
+      invite,
+      hint: 'Call `check-approval --invite <same> --request-id <id>` periodically. When status becomes "active", a session_handle will be returned.',
+    })
+  }
+
+  // Any other status (agent_unavailable, agent_busy, rate_limited, etc.):
+  // strip credential-shaped fields defensively before emitting. The current
+  // OvO server never includes a token in non-success responses, but the
+  // ConnectResponse type is open-ended ([k: string]: unknown) — if the
+  // server ever changes shape, we don't want to leak through this path.
+  ok(sanitizeConnectResponse(res))
+}
+
+async function cmdCheckApproval(flags: Record<string, string | true>) {
+  const invite = requireString(flags, 'invite', 'check-approval')
+  const requestId = requireString(flags, 'request-id', 'check-approval')
+  const { slug, host } = parseInvite(invite)
+  const res = await pollConnect(host, slug, requestId)
+  if (res.status === 'active') {
+    const session = await persistFromConnect(res, slug, host)
+    ok({
+      status: 'active',
+      session_handle: session.handle,
+      peer_name: session.peerAgentName,
+      token_expires_at: session.tokenExpiresAt,
+    })
+  }
+  // Same sanitization rationale as cmdConnect's fall-through.
+  ok(sanitizeConnectResponse(res))
+}
+
+// Strip any credential-shaped fields from a ConnectResponse before the CLI
+// emits it to stdout. Only called from fall-through paths; success paths
+// already use explicit allow-lists.
+function sanitizeConnectResponse(res: ConnectResponse): Record<string, unknown> {
+  const { token: _t, client_secret: _cs, ...safe } = res
+  return safe as Record<string, unknown>
+}
+
+// Refresh the session's bearer token when it's expired or within this skew, so
+// a command never starts with a token about to lapse mid-request.
+const TOKEN_REFRESH_SKEW_MS = 60_000
+
+// Return the session with a fresh bearer token, silently reauthorizing via the
+// stored client_secret when the current token is expired/near-expiry. The
+// rotated token is persisted so the next command reuses it.
+async function freshToken(sess: Session): Promise<Session> {
+  if (new Date(sess.tokenExpiresAt).getTime() - Date.now() > TOKEN_REFRESH_SKEW_MS) return sess
+  const { token, token_expires_at } = await reauthorize(sess.host, sess.slug, sess.clientUserId, sess.clientSecret)
+  const updated: Session = { ...sess, token, tokenExpiresAt: token_expires_at }
+  await saveSession(updated)
+  return updated
+}
+
+// Run a token-bearing call with auto-refresh: refresh proactively first, and if
+// the call is still rejected (401 → session_expired, e.g. revoked mid-flight),
+// reauthorize once and retry. A genuine dead connection surfaces session_expired.
+async function withFreshToken<T>(sess: Session, fn: (s: Session) => Promise<T>): Promise<T> {
+  let s = await freshToken(sess)
+  try {
+    return await fn(s)
+  } catch (e) {
+    if ((e as ApiError).code !== 'session_expired') throw e
+    const { token, token_expires_at } = await reauthorize(s.host, s.slug, s.clientUserId, s.clientSecret)
+    s = { ...s, token, tokenExpiresAt: token_expires_at }
+    await saveSession(s)
+    return await fn(s)
+  }
+}
+
+async function cmdSendMessage(flags: Record<string, string | true>) {
+  const handle = requireString(flags, 'session', 'send-message')
+  const content = requireString(flags, 'content', 'send-message')
+  const sess = await getSession(handle)
+  if (!sess) {
+    throw new CliError(
+      `Unknown --session "${handle}". Use list-sessions to see active handles, or connect first.`,
+    )
+  }
+  const res = await withFreshToken(sess, (s) => sendMessage(s.host, s.token, content))
+  ok({
+    ok: res.ok,
+    message_id: res.message?.id,
+    seq: res.message?.seq,
+    reply_status: res.reply_status,
+    agent_reply: res.agent_message,
+  })
+}
+
+async function cmdCheckReplies(flags: Record<string, string | true>) {
+  const handle = requireString(flags, 'session', 'check-replies')
+  const wait = optionalInt(flags, 'wait', 'check-replies') ?? 0
+  if (wait < 0 || wait > 60) throw new CliError('check-replies: --wait must be between 0 and 60 seconds')
+  const sess = await getSession(handle)
+  if (!sess) throw new CliError(`Unknown --session "${handle}".`)
+  const res = await withFreshToken(sess, (s) => pollReplies(s.host, s.token, s.lastSeq, wait))
+  if (res.last_seq > sess.lastSeq) {
+    await updateSession(sess.handle, { lastSeq: res.last_seq })
+  }
+  ok({ messages: res.messages, last_seq: res.last_seq })
+}
+
+async function cmdListSessions() {
+  const all = await listSessions()
+  ok(
+    all.map((s) => ({
+      handle: s.handle,
+      peer: s.peerAgentName,
+      slug: s.slug,
+      host: s.host,
+      expires_at: s.tokenExpiresAt,
+      last_seq: s.lastSeq,
+      created_at: s.createdAt,
+    })),
+  )
+}
+
+async function cmdForgetSession(flags: Record<string, string | true>) {
+  const handle = requireString(flags, 'session', 'forget-session')
+  await deleteSession(handle)
+  ok({ ok: true, forgot: handle })
+}
+
+// ── doctor ─────────────────────────────────────────────────────────────
+// Self-diagnostic: prints environment + connectivity. Useful for
+// agents to confirm the skill is healthy before attempting a connect,
+// and for users to attach to bug reports.
+
+interface DoctorCheck {
+  ok: boolean
+  value?: unknown
+  reason?: string
+  warning?: string
+}
+
+async function checkStateDir(): Promise<DoctorCheck> {
+  try {
+    await fs.mkdir(STATE_DIR, { recursive: true, mode: 0o700 })
+    await fs.access(STATE_DIR, fsConstants.W_OK)
+    return { ok: true, value: STATE_DIR }
+  } catch (e) {
+    return { ok: false, value: STATE_DIR, reason: (e as Error).message }
+  }
+}
+
+async function checkSessionsFile(): Promise<DoctorCheck> {
+  try {
+    const st = await fs.stat(STATE_FILE)
+    const modeOctal = (st.mode & 0o777).toString(8).padStart(3, '0')
+    const tooPermissive = (st.mode & 0o077) !== 0
+    return {
+      ok: !tooPermissive,
+      value: { path: STATE_FILE, mode: modeOctal, exists: true },
+      warning: tooPermissive
+        ? `sessions.json mode ${modeOctal} is world/group readable; expected 600. Run: chmod 600 ${STATE_FILE}`
+        : undefined,
+    }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { ok: true, value: { path: STATE_FILE, exists: false } }
+    }
+    return { ok: false, value: STATE_FILE, reason: (e as Error).message }
+  }
+}
+
+function checkNodeVersion(): DoctorCheck {
+  const v = process.versions.node
+  const major = Number.parseInt(v.split('.')[0] ?? '0', 10)
+  if (major >= 18) return { ok: true, value: `v${v}` }
+  return { ok: false, value: `v${v}`, reason: `Node ${v} is too old; this skill requires >= 18 for built-in fetch.` }
+}
+
+function checkFetch(): DoctorCheck {
+  if (typeof fetch === 'function') return { ok: true }
+  return { ok: false, reason: 'global fetch is not available; Node 18+ required.' }
+}
+
+function checkApiBase(): { check: DoctorCheck; base: string } {
+  const fromEnv = process.env.OVOCLAW_API_BASE
+  if (!fromEnv) {
+    return { check: { ok: true, value: DEFAULT_API_BASE, warning: 'using built-in default (OVOCLAW_API_BASE not set)' }, base: DEFAULT_API_BASE }
+  }
+  try {
+    const u = new URL(fromEnv)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return { check: { ok: false, value: fromEnv, reason: `OVOCLAW_API_BASE must use http or https, got ${u.protocol}` }, base: fromEnv }
+    }
+    return { check: { ok: true, value: fromEnv }, base: fromEnv }
+  } catch {
+    return { check: { ok: false, value: fromEnv, reason: 'OVOCLAW_API_BASE is not a valid URL' }, base: fromEnv }
+  }
+}
+
+async function checkApiReachable(base: string): Promise<DoctorCheck> {
+  const start = Date.now()
+  try {
+    const res = await fetch(`${base}/manifest/__doctor_probe__`, { method: 'GET' })
+    const elapsed = Date.now() - start
+    // We expect 404 for the fake slug. Any HTTP response = reachable.
+    return { ok: true, value: { http_status: res.status, response_time_ms: elapsed } }
+  } catch (e) {
+    const cause = (e as Error & { cause?: { code?: string; message?: string } }).cause
+    const reason = cause?.code || cause?.message || (e as Error).message
+    return { ok: false, value: base, reason: `network_error: ${reason}` }
+  }
+}
+
+async function cmdDoctor() {
+  const node = checkNodeVersion()
+  const fetchCheck = checkFetch()
+  const stateDir = await checkStateDir()
+  const sessionsFile = await checkSessionsFile()
+  const apiBaseResult = checkApiBase()
+  const apiReachable = await checkApiReachable(apiBaseResult.base)
+
+  const allOk = node.ok && fetchCheck.ok && stateDir.ok && sessionsFile.ok && apiBaseResult.check.ok && apiReachable.ok
+
+  const report = {
+    ok: allOk,
+    skill: { name: SKILL_NAME, version: SKILL_VERSION },
+    // Deliberately no hostname — doctor output is often pasted in bug
+    // reports, and the OS hostname can include username or employer info.
+    runtime: { node: process.versions.node, platform: platform(), arch: arch() },
+    checks: {
+      node_version: node,
+      fetch: fetchCheck,
+      state_dir: stateDir,
+      sessions_file: sessionsFile,
+      api_base: apiBaseResult.check,
+      api_reachable: apiReachable,
+    },
+  }
+
+  if (allOk) {
+    ok(report)
+  } else {
+    process.stderr.write(JSON.stringify(report, null, 2) + '\n')
+    process.exit(1)
+  }
+}
+
+// ── Help (JSON, not text — same machine-readable contract) ────────────
+
+function cmdHelp(): never {
+  ok({
+    name: SKILL_NAME,
+    version: SKILL_VERSION,
+    description:
+      'CLI executable skill that lets shell-capable AI agents connect to an existing OvOclaw shared agent via an invite URL or slug. Not an MCP server. Does not share or serve the current local agent.',
+    output_contract: {
+      success: 'exactly one JSON object on stdout, exit 0',
+      failure: 'exactly one JSON object on stderr with `error` and `code` fields, exit 1',
+    },
+    global_flags: [{ name: '--json', description: 'No-op; JSON is always the output format.' }],
+    subcommands: [
+      {
+        name: 'inspect-invite',
+        description: 'Read public manifest for an invite without connecting.',
+        required: [{ name: '--invite', description: 'Slug or share URL' }],
+        optional: [],
+      },
+      {
+        name: 'connect',
+        description: 'Open a session via an invite. Persists session_handle locally.',
+        required: [
+          { name: '--invite', description: 'Slug or share URL' },
+          { name: '--intro', description: 'Introduction the remote agent owner will see (max 2000 chars)' },
+        ],
+        optional: [
+          { name: '--agent-name', description: 'Display name of the calling agent' },
+          { name: '--owner-name', description: 'Display name of the human user' },
+          { name: '--purpose', description: 'Short purpose tag (max 128 chars)' },
+        ],
+      },
+      {
+        name: 'check-approval',
+        description: 'Poll a pending owner-approval connect request.',
+        required: [
+          { name: '--invite', description: 'Same invite passed to connect' },
+          { name: '--request-id', description: 'request_id returned by connect' },
+        ],
+        optional: [],
+      },
+      {
+        name: 'send-message',
+        description: 'Send a message on an active session.',
+        required: [
+          { name: '--session', description: 'session_handle from connect' },
+          { name: '--content', description: 'Message body (1..16000 chars)' },
+        ],
+        optional: [],
+      },
+      {
+        name: 'check-replies',
+        description: 'Fetch new replies from the remote agent.',
+        required: [{ name: '--session', description: 'session_handle from connect' }],
+        optional: [{ name: '--wait', description: 'Long-poll window 0..60 seconds (default 0)' }],
+      },
+      { name: 'list-sessions', description: 'List local sessions.', required: [], optional: [] },
+      {
+        name: 'forget-session',
+        description: 'Delete a session from local storage. Server-side state is not revoked.',
+        required: [{ name: '--session', description: 'session_handle to delete' }],
+        optional: [],
+      },
+      { name: 'doctor', description: 'Self-diagnostic: environment + connectivity.', required: [], optional: [] },
+      { name: 'help', description: 'Print this JSON help document. Also: --help, -h.', required: [], optional: [] },
+    ],
+  })
+}
+
+// ── Dispatch ──────────────────────────────────────────────────────────
+
+async function main() {
+  const argv = process.argv.slice(2)
+
+  if (argv.length === 0) {
+    process.stderr.write(
+      JSON.stringify(
+        { error: 'no subcommand provided. Run with --help to see available commands.', code: 'cli_error' },
+        null,
+        2,
+      ) + '\n',
+    )
+    process.exit(1)
+  }
+
+  if (argv[0] === '-h' || argv[0] === '--help' || argv[0] === 'help') {
+    cmdHelp()
+  }
+
+  const subcommand = argv[0]
+  const { flags } = parseArgs(argv.slice(1))
+  // --json is accepted on every subcommand as a no-op since JSON is the
+  // default and only output format. Strip it before handler validation.
+  delete flags.json
+
+  switch (subcommand) {
+    case 'inspect-invite':  return cmdInspectInvite(flags)
+    case 'connect':         return cmdConnect(flags)
+    case 'check-approval':  return cmdCheckApproval(flags)
+    case 'send-message':    return cmdSendMessage(flags)
+    case 'check-replies':   return cmdCheckReplies(flags)
+    case 'list-sessions':   return cmdListSessions()
+    case 'forget-session':  return cmdForgetSession(flags)
+    case 'doctor':          return cmdDoctor()
+    default:
+      throw new CliError(`Unknown subcommand: ${subcommand}. Run with --help to see available commands.`)
+  }
+}
+
+main().catch(fail)

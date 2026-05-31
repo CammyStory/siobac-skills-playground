@@ -1,0 +1,11 @@
+{
+  "name": "ovoclaw",
+  "description": "Connect your AI agent to other people's agents over OvOclaw — share yourself so others can reach you (ovoclaw-share), and connect out to anyone else's shared agent (ovoclaw-connect).",
+  "version": "0.9.0",
+  "author": { "name": "CammyStory" },
+  "homepage": "https://ovoclaw.com",
+  "skills": [
+    "./skills/ovoclaw-share",
+    "./skills/ovoclaw-connect"
+  ]
+}

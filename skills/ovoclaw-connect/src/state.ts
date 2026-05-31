@@ -1,0 +1,111 @@
+import { promises as fs } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
+
+export const STATE_DIR = join(homedir(), '.ovoclaw-connect')
+export const STATE_FILE = join(STATE_DIR, 'sessions.json')
+
+export interface Session {
+  handle: string
+  slug: string
+  host: string
+  peerAgentName?: string
+  token: string
+  tokenExpiresAt: string
+  clientUserId: string
+  clientSecret: string
+  conversationId?: string
+  lastSeq: number
+  createdAt: string
+}
+
+const DIR = STATE_DIR
+const FILE = STATE_FILE
+
+type Store = Record<string, Session>
+
+async function readAll(): Promise<Store> {
+  try {
+    const raw = await fs.readFile(FILE, 'utf8')
+    const parsed = JSON.parse(raw)
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Store) : {}
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    throw e
+  }
+}
+
+// Session handles are always s_ + 16 lowercase hex chars. We reject anything
+// else as input to guard against (a) prototype-chain access via keys like
+// "__proto__" / "constructor" and (b) accidental confusion with arbitrary
+// user-supplied strings.
+const HANDLE_RE = /^s_[0-9a-f]{16}$/
+
+function isValidHandle(handle: string): boolean {
+  return HANDLE_RE.test(handle)
+}
+
+async function writeAll(data: Store): Promise<void> {
+  await fs.mkdir(DIR, { recursive: true, mode: 0o700 })
+  // mkdir's mode flag is only honored when the directory is created. If the
+  // directory pre-existed with looser perms (e.g. 0755), the flag is a no-op
+  // and the file would be world-readable through its parent. Force the mode.
+  // Same logic for the file below: writeFile's mode flag is only applied on
+  // initial create. chmod ensures the perms after every write. Best-effort
+  // on platforms where chmod is a no-op (Windows).
+  try { await fs.chmod(DIR, 0o700) } catch {}
+  await fs.writeFile(FILE, JSON.stringify(data, null, 2), { mode: 0o600 })
+  try { await fs.chmod(FILE, 0o600) } catch {}
+}
+
+export async function saveSession(s: Session): Promise<void> {
+  if (!isValidHandle(s.handle)) {
+    throw new Error(`saveSession: invalid handle ${JSON.stringify(s.handle)}`)
+  }
+  const all = await readAll()
+  all[s.handle] = s
+  await writeAll(all)
+}
+
+export async function getSession(handle: string): Promise<Session | null> {
+  if (!isValidHandle(handle)) return null
+  const all = await readAll()
+  // Object.hasOwn avoids returning Object.prototype if someone reaches
+  // through the handle-validation guard somehow.
+  return Object.prototype.hasOwnProperty.call(all, handle) ? all[handle] : null
+}
+
+export async function listSessions(): Promise<Session[]> {
+  const all = await readAll()
+  // Only return entries whose key matches the expected handle shape, in case
+  // sessions.json was hand-edited with junk keys.
+  return Object.entries(all)
+    .filter(([k]) => isValidHandle(k))
+    .map(([, v]) => v)
+}
+
+export async function deleteSession(handle: string): Promise<void> {
+  if (!isValidHandle(handle)) return
+  const all = await readAll()
+  if (!Object.prototype.hasOwnProperty.call(all, handle)) return
+  delete all[handle]
+  await writeAll(all)
+}
+
+export async function updateSession(
+  handle: string,
+  patch: Partial<Session>,
+): Promise<Session | null> {
+  if (!isValidHandle(handle)) return null
+  const all = await readAll()
+  if (!Object.prototype.hasOwnProperty.call(all, handle)) return null
+  const existing = all[handle]
+  all[handle] = { ...existing, ...patch }
+  await writeAll(all)
+  return all[handle]
+}
+
+export function newHandle(): string {
+  return 's_' + randomBytes(8).toString('hex')
+}

@@ -209,19 +209,43 @@ async function cmdSendMessage(flags) {
         agent_reply: res.agent_message,
     });
 }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// With --watch the SKILL itself does the retry loop, so the cadence is
+// guaranteed instead of relying on the agent to call this repeatedly (which it
+// often won't). Defaults give 12 checks total (the first read + 11 retries),
+// ~10s apart (~2 minutes), returning the INSTANT a reply arrives. Without
+// --watch it's a single immediate read (backwards-compatible). The window is
+// tunable with --retries and --interval. Note: with --watch this command can
+// block up to retries×interval seconds — fine for a foreground call, but if the
+// host kills long commands, lower --retries/--interval and call it more often.
 async function cmdCheckReplies(flags) {
     const handle = requireString(flags, 'session', 'check-replies');
     const wait = optionalInt(flags, 'wait', 'check-replies') ?? 0;
     if (wait < 0 || wait > 60)
         throw new CliError('check-replies: --wait must be between 0 and 60 seconds');
+    const watch = flags.watch !== undefined;
+    const retries = optionalInt(flags, 'retries', 'check-replies') ?? (watch ? 11 : 0);
+    const interval = optionalInt(flags, 'interval', 'check-replies') ?? 10;
+    if (retries < 0 || retries > 60)
+        throw new CliError('check-replies: --retries must be between 0 and 60');
+    if (interval < 1 || interval > 60)
+        throw new CliError('check-replies: --interval must be between 1 and 60 seconds');
     const sess = await getSession(handle);
     if (!sess)
         throw new CliError(`Unknown --session "${handle}".`);
-    const res = await withFreshToken(sess, (s) => pollReplies(s.host, s.token, s.lastSeq, wait));
+    // Poll with the session's original cursor each time; only commit lastSeq at
+    // the end. Stop early the moment any reply arrives.
+    let res = await withFreshToken(sess, (s) => pollReplies(s.host, s.token, sess.lastSeq, wait));
+    let checks = 1;
+    while (checks <= retries && (res.messages ?? []).length === 0) {
+        await sleep(interval * 1000);
+        res = await withFreshToken(sess, (s) => pollReplies(s.host, s.token, sess.lastSeq, wait));
+        checks++;
+    }
     if (res.last_seq > sess.lastSeq) {
         await updateSession(sess.handle, { lastSeq: res.last_seq });
     }
-    ok({ messages: res.messages, last_seq: res.last_seq });
+    ok({ messages: res.messages, last_seq: res.last_seq, checks });
 }
 async function cmdListSessions() {
     const all = await listSessions();
@@ -394,9 +418,14 @@ function cmdHelp() {
             },
             {
                 name: 'check-replies',
-                description: 'Fetch new replies from the remote agent.',
+                description: 'Fetch new replies from the remote agent. With --watch, the skill itself retries until a reply arrives.',
                 required: [{ name: '--session', description: 'session_handle from connect' }],
-                optional: [{ name: '--wait', description: 'Long-poll window 0..60 seconds (default 0)' }],
+                optional: [
+                    { name: '--watch', description: 'Retry internally until a reply arrives (default 12 checks ~10s apart, ~2 min). One call = the whole cadence.' },
+                    { name: '--retries', description: 'Number of retries after the first read (default 11 with --watch, 0 without). 0..60.' },
+                    { name: '--interval', description: 'Seconds between checks (default 10). 1..60.' },
+                    { name: '--wait', description: 'Per-request server wait window 0..60s (currently a no-op server-side).' },
+                ],
             },
             { name: 'list-sessions', description: 'List local sessions.', required: [], optional: [] },
             {

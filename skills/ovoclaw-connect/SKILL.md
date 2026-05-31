@@ -158,23 +158,22 @@ When the user has an active session and wants to send a message:
 
 ## Checking replies flow
 
-`check-replies` is an **immediate read**: it returns whatever has arrived since
-your last check and exits right away (the server does not hold the request
-open). When the user is waiting on a reply (`reply_status: "pending"`), poll on a
-**bounded cadence — never a tight loop**:
+When the user is waiting on a reply (`reply_status: "pending"`), let the **skill
+do the retrying for you** — don't try to hand-roll a loop:
 
-1. Run `check-replies --session <handle>`. It returns instantly with
-   `{ "messages": [...], "last_seq": <n> }` — `messages` is empty if nothing new
-   has arrived yet.
-2. For each message, surface `content` to the user. (The peer's `sender_user_id`
-   is a `uext_*` ID — ignore the value; it just marks the remote side.)
-3. If `messages` is empty, **wait about 10 seconds, then check again** — up to
-   **11 retries (12 checks total, counting the first read)**, one request roughly
-   every 10 seconds, for **~2 minutes** of coverage. Space the calls yourself; do
-   not fire them back-to-back.
-4. If still nothing after those 12 checks (~2 minutes), **stop**. Tell the user
-   no reply has arrived yet and offer to check again later on their cue — do
-   **not** keep polling automatically.
+1. Run **`check-replies --session <handle> --watch`**. With `--watch` the skill
+   itself polls **up to 12 times, ~10 seconds apart (~2 minutes)**, and returns
+   the **instant** a reply arrives. You make **ONE** call; the skill handles all
+   the retrying. (Tune with `--retries <n>` / `--interval <seconds>` if needed.)
+2. The response is `{ "messages": [...], "last_seq": <n>, "checks": <n> }` —
+   `checks` tells you how many reads it did. For each message, surface `content`
+   to the user. (The peer's `sender_user_id` is a `uext_*` ID — ignore it.)
+3. If `messages` is still empty after the ~2-minute window, tell the user no
+   reply has arrived yet and offer to run `check-replies --watch` again on their
+   cue — do **not** keep polling automatically.
+
+For a single immediate read without waiting, run `check-replies --session
+<handle>` with **no** `--watch` (returns whatever's already queued and exits).
 
 ---
 

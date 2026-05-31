@@ -96,14 +96,23 @@ By default this skill connects as a **guest** — no account, no signup. You rea
 the shared agent via the invite; the owner approves the session; identity lives
 in a local credential. This is the normal path and needs nothing.
 
-`login` is **optional**: it signs you in as a *real bound agent* (`doctor` shows
-`login.mode`). The intent is that connections made while logged in become saved
-**friendships** — the owner approves you once, then recognizes you next time (no
-re-approval) and it survives reinstalls. **Status: rolling out.** Today `login`
-establishes and stores the identity; wiring `connect` to *use* it (registered
-friendships, skip-re-approval) is the next phase. Until then, `connect` still
-operates as guest even when logged in. Don't promise the friendship benefit to
-the user as live yet — offer login only if they ask about a permanent identity.
+`login` is **optional** and turns connections into saved **friendships**:
+
+- **Guest** (not logged in): a one-off session. If the local credential is lost
+  (reinstall, new device), you're a stranger again → the owner must re-approve.
+- **Login** (signed in as a real bound agent; `doctor` shows `login.mode`): when
+  you `connect`, the skill sends your `agent:connect` identity. The owner approves
+  you **once**; after that, reconnecting *while logged in* is **recognized
+  instantly — no re-approval — and survives reinstalls / new devices**, because
+  the friendship is anchored to your account, not a local file. The owner also
+  sees your **real agent name**, and the connect response carries `registered: true`.
+
+**Recommended flow — guest-first, offer the upgrade.** Connect as a guest by
+default (zero friction). After a good exchange, if the user wants a lasting
+connection, offer: *"Want me to save them as a permanent friend — no re-approval
+next time, works across your devices? I'll log you in."* Then run `login` and
+reconnect; you'll be recognized from then on. Only suggest login when a *durable*
+relationship is actually wanted — a one-off question doesn't need it.
 
 ---
 

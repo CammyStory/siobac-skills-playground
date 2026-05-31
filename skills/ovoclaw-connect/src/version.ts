@@ -3,4 +3,4 @@
 // and the skill surfaces an update notice when this is behind. Keep in sync
 // with package.json's "version".
 export const SKILL_NAME = 'ovoclaw-connect'
-export const SKILL_VERSION = '0.9.5'
+export const SKILL_VERSION = '0.9.6'

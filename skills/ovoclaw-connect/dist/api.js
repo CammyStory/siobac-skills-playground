@@ -110,10 +110,13 @@ export async function getManifest(host, slug) {
         method: 'GET',
     });
 }
-export async function connect(host, slug, body) {
+export async function connect(host, slug, body, bearer) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (bearer)
+        headers.Authorization = `Bearer ${bearer}`;
     return jsonFetch(`${host}/connect/${encodeURIComponent(slug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
     });
 }

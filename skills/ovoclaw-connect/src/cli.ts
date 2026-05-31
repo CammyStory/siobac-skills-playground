@@ -13,6 +13,7 @@ import {
   reauthorize,
   requestDeviceCode,
   pollDeviceToken,
+  refreshAccessToken,
   sendMessage,
   type ConnectResponse,
   type ApiError,
@@ -133,12 +134,15 @@ async function cmdConnect(flags: Record<string, string | true>) {
   const purpose_hint = optionalString(flags, 'purpose')
 
   const { slug, host } = parseInvite(invite)
+  // If logged in, send the agent:connect bearer → registered (friendship)
+  // connect. Otherwise this is a guest connect (today's behaviour).
+  const bearer = await loginBearer()
   const res = await connect(host, slug, {
     your_agent_name,
     your_owner_name,
     introduction,
     purpose_hint,
-  })
+  }, bearer ?? undefined)
 
   if (res.status === 'active' || res.status === 'reauthorized' || res.status === 'already_connected') {
     const session = await persistFromConnect(res, slug, host)
@@ -147,6 +151,11 @@ async function cmdConnect(flags: Record<string, string | true>) {
       session_handle: session.handle,
       peer_name: session.peerAgentName,
       token_expires_at: session.tokenExpiresAt,
+      conversation_id: session.conversationId,
+      registered: res.registered ?? false,
+      ...(res.registered
+        ? { note: 'Registered friendship: you are saved as a friend — reconnecting later (while logged in) needs no re-approval and survives reinstalls.' }
+        : {}),
     })
   }
 
@@ -246,6 +255,30 @@ async function withFreshToken<T>(sess: Session, fn: (s: Session) => Promise<T>):
 // uses the skill's default base / OVOCLAW_API_BASE.
 function loginBase(): string {
   return process.env.OVOCLAW_API_BASE ?? DEFAULT_API_BASE
+}
+
+// Return a fresh agent:connect bearer if the user is logged in (refreshing it
+// silently when expired/near-expiry), or null when in guest mode.
+async function loginBearer(): Promise<string | null> {
+  const auth = await loadAuth()
+  if (!auth) return null
+  if (new Date(auth.expiresAt).getTime() - Date.now() > 60_000) return auth.accessToken
+  if (!auth.refreshToken) return auth.accessToken
+  try {
+    const t = await refreshAccessToken(loginBase(), auth.refreshToken)
+    const updated: AuthState = {
+      ...auth,
+      accessToken: t.access_token,
+      tokenType: t.token_type,
+      expiresAt: new Date(Date.now() + t.expires_in * 1000).toISOString(),
+      refreshToken: t.refresh_token ?? auth.refreshToken,
+      scope: t.scope ?? auth.scope,
+    }
+    await saveAuth(updated)
+    return updated.accessToken
+  } catch {
+    return auth.accessToken // refresh failed; let the server decide
+  }
 }
 
 async function cmdLogin(flags: Record<string, string | true>) {

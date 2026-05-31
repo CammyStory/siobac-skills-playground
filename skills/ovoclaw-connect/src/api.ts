@@ -39,6 +39,9 @@ export interface ConnectResponse {
   // them only briefly, in memory — cleared on first pickup, after ~5 min, or on
   // a server restart). When true, `token`/`client_secret` are absent.
   token_already_delivered?: boolean
+  // Set when the connection was made in login mode (a registered agent
+  // friendship) rather than as a guest session.
+  registered?: boolean
   [k: string]: unknown
 }
 
@@ -233,10 +236,13 @@ export async function connect(
   host: string,
   slug: string,
   body: ConnectInput,
+  bearer?: string,   // agent:connect OAuth token → registered (login-mode) connect
 ): Promise<ConnectResponse> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (bearer) headers.Authorization = `Bearer ${bearer}`
   return jsonFetch<ConnectResponse>(`${host}/connect/${encodeURIComponent(slug)}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   })
 }

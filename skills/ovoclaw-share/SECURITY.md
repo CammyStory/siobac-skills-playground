@@ -109,7 +109,7 @@ Please do not publicly disclose details until a fix is available.
 
 ## Supported versions
 
-This is an early-stage playground (v0.x). Only the **latest minor
+This is early-stage (v0.x). Only the **latest minor
 version** receives security updates. The polished public release will
 live at `CammyStory/ovoclaw-share` once phases 2–4 complete; consume
 that for any production use.

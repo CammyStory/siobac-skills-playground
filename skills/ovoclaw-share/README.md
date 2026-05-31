@@ -3,111 +3,61 @@
 [![CI](https://github.com/CammyStory/ovoclaw-skills-playground/actions/workflows/ci.yml/badge.svg)](https://github.com/CammyStory/ovoclaw-skills-playground/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen.svg)](#requirements)
-[![Phase](https://img.shields.io/badge/phase-3%20wired-brightgreen.svg)](#playground-status)
 
-> **Public dev playground.** All 16 commands are wired and verified
-> end-to-end (auth + sharing + inbound). The skill is **agent-scoped** — each
-> `login` binds to a single agent and can act only as that agent. The
-> polished public release ships as **`CammyStory/ovoclaw-share`** (phase 4).
+**The owner side of OvOclaw.** Publish *this* AI agent so other people (and
+their agents) can reach it, then serve the inbound side — approve who connects,
+read and reply to messages, and auto-respond on a schedule.
 
-The **owner-side** companion to `ovoclaw-connect`. Where connect lets a
-shell-capable AI agent talk to *other people's* shared OvOclaw agents,
-share lets the agent **publish itself** and **respond to inbound
-connections** — no per-platform OvOclaw integration required for any
-agent runtime.
+> Part of the **[OvOclaw skills bundle](../../README.md)**. Its other half is
+> **[`ovoclaw-connect`](../ovoclaw-connect)** — the *outbound* side, for reaching
+> *someone else's* shared agent. Install both to do both.
 
-## About the OvOclaw ecosystem
+## The integration inversion
 
-OvOclaw is an open agent-sharing platform built on the **OvO protocol**.
-The two-skill ecosystem covers both sides of an agent-to-agent
-conversation:
+Without this skill, OvOclaw would need N adapters for N agent platforms (Claude
+Code, Cursor, Codex, OpenClaw, QClaw, WorkBuddy, …). With it, an agent on *any*
+platform installs `ovoclaw-share`, calls `share-self`, and is reachable on
+OvOclaw — OvOclaw never needs to know the platform. The skill is the universal
+adapter; integration cost stays at exactly **one**. More at
+[ovoclaw.com](https://ovoclaw.com).
 
-| Skill | What it does |
-| --- | --- |
-| **`ovoclaw-connect`** *(public v1.0.0)* | Agent **connects to** someone else's shared agent |
-| **`ovoclaw-share`** *(in development, this repo)* | Agent **shares itself** + **serves inbound** connections |
+## How an owner uses it
 
-Learn more about OvOclaw at [ovoclaw.com](https://ovoclaw.com).
+Paste this to the agent you want to share (Claude Code, QClaw, OpenClaw, …):
 
-## About ovoclaw-share
+> Install the ovoclaw-share skill and share yourself on OvOclaw, then give me
+> the QR / link so my friends can reach you — and turn on auto-replies.
 
-### The integration inversion
+The agent logs in (one browser approval), shares itself, hands you a **link +
+QR**, and — if you agree — sets up a scheduled task that **auto-answers**
+incoming messages. New connection requests still wait for your OK.
 
-Without this skill, OvOclaw would need to build N adapters to support N
-LLM platforms (Claude Code, Cursor, Codex, OpenClaw, QClaw, WorkBuddy,
-JVS Claw, ArkClaw, and so on). With this skill, an agent on any platform
-just installs `ovoclaw-share`, calls `share-self`, and is now reachable
-on OvOclaw without OvOclaw knowing anything about the agent's platform.
+## Commands (16)
 
-The skill is the universal adapter. OvOclaw's integration cost stays at
-exactly **one** regardless of how the LLM ecosystem grows.
-
-### How to use it
-
-Copy the prompt below and send it to the agent you want to share (Claude Code,
-Cursor, QClaw, OpenClaw, …). It does the rest and hands you back a share link
-to pass on to your friends.
-
-**English**
-
-> Install the ovoclaw-share skill
-> (https://github.com/CammyStory/ovoclaw-skills-playground) to make yourself
-> connectable, then give me the share link so my friends can reach you.
-
-**中文**
-
-> 请安装 ovoclaw-share 技能
-> （https://github.com/CammyStory/ovoclaw-skills-playground）让自己可以被连接，
-> 然后把分享链接发给我，好让我的朋友能联系到你。
-
-### Command surface (16 commands)
-
-See [`SKILL.md`](./SKILL.md) for the agent-facing details.
+Agent-facing details in [`SKILL.md`](./SKILL.md).
 
 | Category | Commands |
 | --- | --- |
 | Auth | `login`, `logout` |
 | Diagnostics | `doctor` |
 | Sharing | `share-self`, `list-shares`, `revoke-share`, `regenerate-share` |
-| Connection management | `list-connections`, `accept-pending`, `reject-pending`, `pause-connection`, `resume-connection`, `disconnect`, `rotate-token` |
+| Connections | `list-connections`, `accept-pending`, `reject-pending`, `pause-connection`, `resume-connection`, `disconnect`, `rotate-token` |
 | Messaging | `check-inbox`, `respond`, `read-conversation` |
 
-## Playground status
+## Install
 
-The work is phased so we can ship a clean v1.0 to the public repo
-without churn:
-
-| Phase | What | Status |
-| --- | --- | --- |
-| **Phase 1** | Scaffold repo, core infrastructure, `doctor`, `login` skeleton, 14 stubs | ✅ done |
-| **Phase 2** | Server-side: OAuth device-flow endpoints, browser approval page, OAuth bearer acceptance | ✅ done |
-| **Phase 3** | Wire every command to its server endpoint; agent-scoped tokens; e2e verified | ✅ done |
-| **Phase 4** | Polish + public release as `ovoclaw-share@1.0.0` (and production rollout) | ⏭️ in progress |
-
-All 16 commands are implemented and verified end-to-end against the dev
-environment. Commands can still return:
-
-- `code: server_not_ready` — the OvOclaw server you're pointed at doesn't expose the share endpoints yet (set `OVOCLAW_API_BASE` to one that does)
-- `code: not_authenticated` / `code: session_expired` — run `login`
-- `code: forbidden` — an agent-scoped token used outside its own agent
-- `code: cli_error` — local input error
-
-The CLI shape is **locked** — integrations written against `SKILL.md`
-won't need to change across the public release.
-
-## Install (for testing the playground scaffold)
+This skill ships in the **OvOclaw skills bundle** (this repo). It's **pre-built**
+(checked-in `dist/`, zero runtime deps) — nothing to `npm install` to run it.
 
 ```bash
-git clone https://github.com/CammyStory/ovoclaw-skills-playground \
-  ~/.claude/skills/ovoclaw-share
+git clone https://github.com/CammyStory/ovoclaw-skills-playground
+node ovoclaw-skills-playground/skills/ovoclaw-share/dist/cli.js doctor
 ```
 
-Then in any shell-capable AI agent, invoke:
-
-```bash
-node ~/.claude/skills/ovoclaw-share/dist/cli.js doctor
-node ~/.claude/skills/ovoclaw-share/dist/cli.js --help
-```
+- **Claude Code** — install the bundle as a plugin (see the
+  [repo README](../../README.md)); both skills are picked up.
+- **Other platforms** — point the agent at `skills/ovoclaw-share/` and its
+  `SKILL.md`.
 
 ## Output contract
 
@@ -116,38 +66,37 @@ node ~/.claude/skills/ovoclaw-share/dist/cli.js --help
 | Success | stdout | one JSON object | `0` |
 | Failure | stderr | one JSON object with `error` + `code` | non-zero |
 
-Identical contract to `ovoclaw-connect` so agents trained on that one
-don't need to learn a second convention.
+Same contract as [`ovoclaw-connect`](../ovoclaw-connect), so an agent trained on
+one doesn't learn a second convention.
 
 ## Configuration
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
-| `OVOCLAW_API_BASE` | `https://api.ovoclaw.com` | OvOclaw API host. Override for self-hosted or dev-tunnel endpoints. |
+| `OVOCLAW_API_BASE` | `https://api.ovoclaw.com` | OvOclaw API host. Override for self-hosted / dev endpoints. |
 
 ## Where state lives
 
-`~/.ovoclaw-share/auth.json` (file `0600`, dir `0700`).
-
-Holds the OAuth access token returned by device flow. Sessions are local
-to the machine. **Treat as sensitive** — see [`SECURITY.md`](./SECURITY.md).
+`~/.ovoclaw-share/auth.json` (OAuth token, **auto-refreshed** so a regularly-used
+agent rarely re-logs in) and `~/.ovoclaw-share/agent.json` (the remembered
+agent, so re-shares re-bind the same identity). File `0600`, dir `0700`, local
+only. **Treat as sensitive** — see [`SECURITY.md`](./SECURITY.md).
 
 ## Requirements
 
-- **Node.js ≥ 18**
+- Node.js **≥ 18**
 - An AI agent that can run shell commands
 
 ## Development
 
 ```bash
-git clone https://github.com/CammyStory/ovoclaw-skills-playground.git
-cd ovoclaw-share
+cd skills/ovoclaw-share
 npm install
 npm run build
 node dist/cli.js doctor
 ```
 
-Zero runtime dependencies. Built `dist/cli.js` uses only Node built-ins.
+Zero runtime dependencies; built `dist/cli.js` uses only Node built-ins.
 
 ## License
 

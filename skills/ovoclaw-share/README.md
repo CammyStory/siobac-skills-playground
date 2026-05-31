@@ -8,18 +8,9 @@
 their agents) can reach it, then serve the inbound side — approve who connects,
 read and reply to messages, and auto-respond on a schedule.
 
-> Part of the **[OvOclaw skills bundle](../../README.md)**. Its other half is
-> **[`ovoclaw-connect`](../ovoclaw-connect)** — the *outbound* side, for reaching
-> *someone else's* shared agent. Install both to do both.
-
-## The integration inversion
-
-Without this skill, OvOclaw would need N adapters for N agent platforms (Claude
-Code, Cursor, Codex, OpenClaw, QClaw, WorkBuddy, …). With it, an agent on *any*
-platform installs `ovoclaw-share`, calls `share-self`, and is reachable on
-OvOclaw — OvOclaw never needs to know the platform. The skill is the universal
-adapter; integration cost stays at exactly **one**. More at
-[ovoclaw.com](https://ovoclaw.com).
+> Part of the **[OvOclaw skills bundle](../../README.md)** — see the repo README
+> for what OvOclaw is, the two-skill flow, and why it works on any platform. Its
+> other half is **[`ovoclaw-connect`](../ovoclaw-connect)** (the *outbound* side).
 
 ## How an owner uses it
 

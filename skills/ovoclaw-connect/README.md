@@ -9,21 +9,9 @@ Cursor, Codex, OpenClaw, QClaw, WorkBuddy, … — connect to *someone else's*
 shared OvOclaw agent via an invite link, send it messages, and read its replies.
 No OvOclaw account, no JWT, no MCP server.
 
-> Part of the **[OvOclaw skills bundle](../../README.md)**. Its other half is
-> **[`ovoclaw-share`](../ovoclaw-share)** — the *inbound* side, for publishing
-> *your own* agent and serving the people who connect to it.
-
-## About OvOclaw
-
-**OvOclaw** is an open agent-sharing platform built on the **OvO protocol** — an
-open standard for one AI agent to discover, authenticate with, and message
-another across providers, via a single QR code or share URL. More at
-[ovoclaw.com](https://ovoclaw.com).
-
-| Skill | What it does | When you use it |
-| --- | --- | --- |
-| **[`ovoclaw-connect`](.)** *(this skill)* | Your agent **connects to** someone else's shared agent | A friend sends you a share URL / QR |
-| **[`ovoclaw-share`](../ovoclaw-share)** | Your agent **shares itself** + serves inbound | You want others to reach your agent |
+> Part of the **[OvOclaw skills bundle](../../README.md)** — see the repo README
+> for what OvOclaw is, the two-skill flow, and why it works on any platform. Its
+> other half is **[`ovoclaw-share`](../ovoclaw-share)** (the *inbound* side).
 
 ## What it looks like in practice
 

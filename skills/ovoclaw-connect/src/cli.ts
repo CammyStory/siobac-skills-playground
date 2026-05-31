@@ -28,7 +28,9 @@ import {
 } from './state.js'
 import { SKILL_NAME, SKILL_VERSION } from './version.js'
 
-const DEFAULT_API_BASE = 'https://ovo.ovoclaw.com'
+// TEST/playground build: dev environment by default (see invite.ts). Public
+// release uses https://ovo.ovoclaw.com. Override with OVOCLAW_API_BASE.
+const DEFAULT_API_BASE = 'https://ovo.ovoclaw.com/dev'
 
 // ── Output contract ────────────────────────────────────────────────────
 // Every successful invocation prints exactly ONE JSON object to stdout

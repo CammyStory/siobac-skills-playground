@@ -6,7 +6,9 @@ import { parseInvite } from './invite.js';
 import { connect, getManifest, getSkillUpdateNotice, pollConnect, pollReplies, reauthorize, sendMessage, } from './api.js';
 import { STATE_DIR, STATE_FILE, deleteSession, getSession, listSessions, newHandle, saveSession, updateSession, } from './state.js';
 import { SKILL_NAME, SKILL_VERSION } from './version.js';
-const DEFAULT_API_BASE = 'https://ovo.ovoclaw.com';
+// TEST/playground build: dev environment by default (see invite.ts). Public
+// release uses https://ovo.ovoclaw.com. Override with OVOCLAW_API_BASE.
+const DEFAULT_API_BASE = 'https://ovo.ovoclaw.com/dev';
 // ── Output contract ────────────────────────────────────────────────────
 // Every successful invocation prints exactly ONE JSON object to stdout
 // and exits 0. Every failed invocation prints exactly ONE JSON object to

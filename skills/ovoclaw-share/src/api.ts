@@ -42,7 +42,11 @@ export function makeApiError(
   return err
 }
 
-const DEFAULT_API_BASE = 'https://api.ovoclaw.com'
+// This is the TEST/playground build: it targets the dev environment (the /dev
+// tunnel to the local server) so testing never touches public production data.
+// The polished public release points at https://api.ovoclaw.com instead.
+// Override anytime with OVOCLAW_API_BASE.
+const DEFAULT_API_BASE = 'https://ovo.ovoclaw.com/dev'
 
 export function getApiBase(): string {
   return process.env.OVOCLAW_API_BASE ?? DEFAULT_API_BASE

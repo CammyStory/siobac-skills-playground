@@ -64,7 +64,7 @@ node ovoclaw-skills-playground/skills/ovoclaw-share/dist/cli.js doctor
 
 | 环境变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `OVOCLAW_API_BASE` | `https://api.ovoclaw.com` | OvOclaw API 主机。自托管 / 开发环境可覆盖。 |
+| `OVOCLAW_API_BASE` | `https://ovo.ovoclaw.com/dev` | OvOclaw API 主机。此测试版本默认指向 **dev** 环境；生产环境请设为 `https://api.ovoclaw.com`，或填自托管端点。 |
 
 ## 状态存放在哪里
 

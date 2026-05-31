@@ -69,7 +69,7 @@ one doesn't learn a second convention.
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
-| `OVOCLAW_API_BASE` | `https://api.ovoclaw.com` | OvOclaw API host. Override for self-hosted / dev endpoints. |
+| `OVOCLAW_API_BASE` | `https://ovo.ovoclaw.com/dev` | OvOclaw API host. This test build targets the **dev** environment by default; set this to `https://api.ovoclaw.com` for production, or any self-hosted endpoint. |
 
 ## Where state lives
 

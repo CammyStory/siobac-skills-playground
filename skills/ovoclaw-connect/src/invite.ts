@@ -9,7 +9,11 @@
 // of the host base, so the skill works with dev tunnels, /external legacy
 // mounts, or any other reverse-proxy prefix the ovoclaw server is hosted under.
 
-const DEFAULT_HOST = 'https://ovo.ovoclaw.com'
+// TEST/playground build: default to the dev environment (the /dev tunnel to the
+// local server) so testing never touches public production. The public release
+// points at https://ovo.ovoclaw.com. A real invite link's own host/prefix always
+// wins over this default; OVOCLAW_API_BASE overrides it for bare-slug input.
+const DEFAULT_HOST = 'https://ovo.ovoclaw.com/dev'
 const ROUTE_SEGMENTS = new Set(['share', 'manifest', 'connect'])
 
 // Errors thrown from this module are user-input shaped. Attach a stable

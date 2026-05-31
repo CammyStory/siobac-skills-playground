@@ -320,6 +320,12 @@ function shareUrlFor(slug) {
 function qrUrlFor(slug) {
     return `${shareUrlFor(slug)}/qr.png`;
 }
+// A ready-to-render inline image embed for the QR. On image-capable platforms
+// the agent drops this straight into its reply so the user sees a scannable QR
+// image, not a bare URL. SKILL.md tells the agent to prefer this over the link.
+function qrMarkdownFor(slug) {
+    return `![Scan to reach me on OvOclaw](${qrUrlFor(slug)})`;
+}
 async function cmdShareSelf(flags) {
     optionalString(flags, 'description'); // accepted for forward-compat; not used by the invite endpoint
     const requiresApproval = parseRequiresApproval(flags);
@@ -336,7 +342,8 @@ async function cmdShareSelf(flags) {
         },
         share_url: shareUrlFor(invite.slug),
         qr_url: qrUrlFor(invite.slug),
-        note: 'createInvite is idempotent — if this agent was already shared, the existing invite is returned. Show the user the share_url AND the qr_url (a scannable QR image) so their friend can scan it.',
+        qr_markdown: qrMarkdownFor(invite.slug),
+        note: 'DISPLAY THE QR INLINE: render it as an image so the user sees a scannable QR, not a link — drop the ready-made `qr_markdown` straight into your reply (it is `![](qr_url)`). Also give `share_url` as a copyable link. Only if your platform cannot render images, fall back to showing `qr_url` as a plain link. (createInvite is idempotent — an already-shared agent returns its existing invite.)',
         next_step: 'IMPORTANT: now offer to turn on AUTO-REPLIES (the owner likely does not know this is possible). Tell them you can answer incoming messages automatically via a scheduled task that checks every few minutes — and set it up if they agree. See "After login: serve the agent" in SKILL.md.',
     });
 }
@@ -347,8 +354,14 @@ async function cmdListShares() {
     const withQr = shares.map((s) => ({
         ...s,
         qr_url: s.invite?.slug ? qrUrlFor(s.invite.slug) : null,
+        qr_markdown: s.invite?.slug ? qrMarkdownFor(s.invite.slug) : null,
     }));
-    ok({ status: 'ok', count: withQr.length, shares: withQr });
+    ok({
+        status: 'ok',
+        count: withQr.length,
+        shares: withQr,
+        note: 'To show a share again, render its `qr_markdown` inline as an image (it is `![](qr_url)`) so the user sees a scannable QR, with `share_url` as the copyable link — not just the raw URL.',
+    });
 }
 async function cmdRevokeShare() {
     const { auth, agentId } = await requireBoundAgent();
@@ -370,7 +383,8 @@ async function cmdRegenerateShare(flags) {
         },
         share_url: shareUrlFor(invite.slug),
         qr_url: qrUrlFor(invite.slug),
-        note: 'The previous slug is now revoked; existing connections are unaffected, but old share links / QR codes stop working.',
+        qr_markdown: qrMarkdownFor(invite.slug),
+        note: 'DISPLAY THE QR INLINE: render `qr_markdown` as an image (it is `![](qr_url)`) so the user sees a scannable QR, with `share_url` as the copyable link — do not just paste the URL. Fall back to the plain `qr_url` link only if your platform cannot render images. The previous slug is now revoked; existing connections are unaffected, but old share links / QR codes stop working.',
     });
 }
 async function cmdListConnections(flags) {

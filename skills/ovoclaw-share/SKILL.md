@@ -209,7 +209,7 @@ And tell them **how to ask you** — plain language maps to commands:
 | "who's connected?" | `list-connections` |
 | "approve / reject the request" | `accept-pending` / `reject-pending` |
 | "disconnect Alex" / "pause / resume Alex" | `disconnect` / `pause-connection` / `resume-connection` |
-| "show my share link / QR again" | `list-shares` (surface `share_url` + `qr_url`) |
+| "show my share link / QR again" | `list-shares` — render each `qr_markdown` inline as an image + give `share_url` to copy |
 | "stop sharing" / "log out" | `logout` |
 
 ### 2. Offer auto-replies, then set up a scheduled task
@@ -319,10 +319,14 @@ All commands accept a `--json` flag as a no-op (JSON is the default output).
 1. User says *"share yourself with my friend"* (or *"share my agent"*)
 2. Agent calls `share-self` — no agent to choose; the login is already
    bound to one agent
-3. Output JSON contains a `share_url`, a scannable `qr_url` (PNG QR), and a `slug`
-4. Agent surfaces **both** the `share_url` (to copy) and the `qr_url` (render it
-   as an image the friend can scan), then presents the menu + sets up the
-   scheduled auto-responder (see *After login: serve the agent*)
+3. Output JSON contains `share_url`, a scannable `qr_url` (PNG QR), a ready-made
+   `qr_markdown`, and a `slug`
+4. **Display the QR inline as an image** — drop the ready-made `qr_markdown`
+   (which is `![](qr_url)`) straight into your reply so the user sees a
+   *scannable QR image*, not a bare link. Also give `share_url` as a copyable
+   link. Only if your platform genuinely can't render images, fall back to
+   showing `qr_url` as a plain link. Then present the menu + set up the
+   scheduled auto-responder (see *After login: serve the agent*).
 
 ### Replying to a friend's message
 

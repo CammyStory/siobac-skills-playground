@@ -34,6 +34,11 @@ export interface ConnectResponse {
   conversation_id?: string
   peer_name?: string
   retry_after_seconds?: number
+  // Set by the approval-poll endpoint when the connection is already `active`
+  // but its one-time token+secret are no longer retrievable (the server holds
+  // them only briefly, in memory — cleared on first pickup, after ~5 min, or on
+  // a server restart). When true, `token`/`client_secret` are absent.
+  token_already_delivered?: boolean
   [k: string]: unknown
 }
 

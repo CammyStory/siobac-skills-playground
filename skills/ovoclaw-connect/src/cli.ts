@@ -75,10 +75,14 @@ function fail(err: unknown, exitCode = 1): never {
 }
 
 async function persistFromConnect(res: ConnectResponse, slug: string, host: string): Promise<Session> {
-  if (!res.token || !res.token_expires_at || !res.your_user_id || !res.client_secret) {
-    throw new Error(
-      `ovoclaw-connect connect succeeded but response missing token fields: ${JSON.stringify(res)}`,
-    )
+  if (res.token_already_delivered || !res.token || !res.token_expires_at || !res.your_user_id || !res.client_secret) {
+    const e = new Error(
+      res.token_already_delivered
+        ? 'This connection was approved but its one-time token was already delivered and can no longer be retrieved. If you already have a session_handle for it you are connected (run list-sessions); otherwise ask the owner to disconnect you, then run connect again with the invite.'
+        : `connect succeeded but the response was missing token fields: ${JSON.stringify(res)}`,
+    ) as Error & { code: string }
+    e.code = res.token_already_delivered ? 'token_already_delivered' : 'missing_token_fields'
+    throw e
   }
   const session: Session = {
     handle: newHandle(),
@@ -159,6 +163,23 @@ async function cmdCheckApproval(flags: Record<string, string | true>) {
   const requestId = requireString(flags, 'request-id', 'check-approval')
   const { slug, host } = parseInvite(invite)
   const res = await pollConnect(host, slug, requestId)
+  // The connection is approved/active, but the server can no longer hand back
+  // the one-time token (it's held only briefly in memory). Don't try to persist
+  // a session from a tokenless response — surface a clear, recoverable status
+  // instead of crashing with "missing token fields".
+  if (res.status === 'active' && res.token_already_delivered) {
+    ok({
+      status: 'token_already_delivered',
+      message:
+        'This connection was approved, but its one-time access token can no longer be retrieved. The server holds it only briefly in memory — it is cleared after the first successful check-approval, after about 5 minutes, or if the server restarts.',
+      already_connected_hint:
+        'If an earlier connect or check-approval already returned a session_handle, you are ALREADY connected — run list-sessions and keep using that session; do not reconnect.',
+      recovery:
+        'Otherwise the token is unrecoverable: ask the owner to disconnect you, then run `connect` again with the same invite to mint a fresh token.',
+      conversation_id: res.conversation_id,
+      your_user_id: res.your_user_id,
+    })
+  }
   if (res.status === 'active') {
     const session = await persistFromConnect(res, slug, host)
     ok({

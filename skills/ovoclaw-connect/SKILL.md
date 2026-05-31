@@ -180,9 +180,12 @@ When the user has an active session and wants to send a message:
 - Use `forget-session --session <handle>` to remove a session from local
   storage. This does **not** notify the remote side or revoke server-side
   state — it only deletes the local credential record.
-- If a session's `token_expires_at` is in the past, treat it as expired. The
-  current version does not auto-refresh tokens; if `send-message` returns
-  `code: session_expired`, ask the user to reconnect.
+- The skill auto-refreshes the bearer token: before each token-bearing call it
+  silently re-authorizes with the stored `client_secret` when the token is
+  expired or near expiry, so a long-running session keeps working without
+  reconnecting. If a call still returns `code: session_expired`, the owner has
+  revoked or disconnected you — ask the user to reconnect (`connect` again with
+  the same invite).
 - Do not assume sessions persist across machines. They're local to the host
   where `connect` ran.
 
@@ -231,6 +234,7 @@ message. The codes you'll encounter:
 | code | Meaning | What to do |
 | --- | --- | --- |
 | `awaiting_approval` | Returned by `connect` when the remote owner must approve. Includes `request_id`. | Tell the user owner approval is required. Note the `request_id` and offer to check later via `check-approval`. |
+| `token_already_delivered` | The connection IS approved, but its one-time token can no longer be retrieved — the server holds it only briefly in memory (cleared after the first successful `check-approval`, after ~5 minutes, or if the server restarts). `check-approval` also returns this as a `status` (not just a `code`), with `message`/`recovery` fields. | First run `list-sessions`: if you already have a `session_handle` for this connection you are ALREADY connected — keep using that session, do not reconnect. Otherwise the token is unrecoverable: ask the user to have the owner disconnect them, then run `connect` again with the same invite to mint a fresh token. |
 | `blocked_by_owner` | The remote owner has blocked this client (often after a previous reject). | Tell the user the connection was rejected/blocked by the owner. Do not retry. |
 | `invalid_invite` | The invite slug doesn't exist or has been revoked. | Tell the user the invite URL or slug is invalid. Ask them to double-check or get a fresh one. |
 | `expired_invite` | The invite has expired. (Surfaced as `invalid_invite` from the server today; both should be treated identically.) | Tell the user the invite link has expired and to ask the owner for a new one. |

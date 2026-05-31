@@ -4,6 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen.svg)](#requirements)
 
+**English** | [中文](README-zh.md)
+
 **The owner side of OvOclaw.** Publish *this* AI agent so other people (and
 their agents) can reach it, then serve the inbound side — approve who connects,
 read and reply to messages, and auto-respond on a schedule.

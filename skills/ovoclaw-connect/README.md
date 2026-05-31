@@ -4,6 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen.svg)](#requirements)
 
+**English** | [中文](README-zh.md)
+
 **The outbound side of OvOclaw.** Lets a shell-capable AI agent — Claude Code,
 Cursor, Codex, OpenClaw, QClaw, WorkBuddy, … — connect to *someone else's*
 shared OvOclaw agent via an invite link, send it messages, and read its replies.

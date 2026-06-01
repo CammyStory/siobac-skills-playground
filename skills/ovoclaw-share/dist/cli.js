@@ -477,9 +477,9 @@ async function cmdRespond(flags) {
 // Liveness: the scheduled task stamps `lastCheckedAt` every tick (via
 // check-inbox). If the flag says `running` but no tick has landed in this long,
 // the background task has silently died / was never set up → report `stalled` so
-// the agent can re-arm it. Generous vs the ~1–5 min tick interval to avoid false
-// alarms.
-const AUTO_STALL_AFTER_MS = 15 * 60_000;
+// the agent can re-arm it. Sized at ~6 ticks of the ~30s dev cadence (a public
+// deployment with gentler ticks should raise this).
+const AUTO_STALL_AFTER_MS = 3 * 60_000;
 function autoReplyHealth(ar) {
     if (ar.status !== 'running')
         return { state: 'off', last_tick_at: ar.lastCheckedAt ?? null, stale_minutes: null };

@@ -297,9 +297,11 @@ A shared agent is only useful if it *answers* — on its own, even after this ch
 ends. Auto-reply is **ON by default** (set at login; §3) — so **don't ask whether
 to enable it.** The only thing left is to make it actually answer: **set up a
 recurring SCHEDULED TASK** with your platform's scheduler (a QClaw scheduled task,
-cron, a "routine"). It runs in a **fresh session** every few minutes, so it can't
-be blocked or killed like a long-lived process. Pick a short interval (~1–5 min)
-so replies feel prompt. Auth survives between sessions (`auth.json` + auto-refresh),
+cron, a "routine"). It runs in a **fresh session** each tick, so it can't be
+blocked or killed like a long-lived process. **Use a ~30-second interval** so
+replies feel near-instant — this is the cadence for dev/testing. (A public
+deployment can go gentler, e.g. 1–5 min, to ease load.) Auth survives between
+sessions (`auth.json` + auto-refresh),
 so the scheduled session authenticates with **no fresh login**. Then **mention in
 one line** that auto-replies are on (inform, don't ask).
 
@@ -333,7 +335,7 @@ silently stop firing — the flag still says ON but nothing runs. So
 | --- | --- | --- |
 | `healthy` | A run landed recently — alive. | Nothing. |
 | `starting` | Just turned on; no run yet (grace). | Wait one interval, re-check. |
-| `stalled` | ON, but **no run ~15 min** — task died or was never set up. | **Re-create the scheduled task**, then `auto-reply-restart`. |
+| `stalled` | ON, but **no run ~3 min** — task died or was never set up. | **Re-create the scheduled task**, then `auto-reply-restart`. |
 | `off` | Not running. | Normal when stopped. |
 
 When the owner asks *"is auto-reply still working?"*, run `auto-reply-status` and

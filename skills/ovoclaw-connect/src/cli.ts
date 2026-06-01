@@ -442,9 +442,9 @@ async function requireSession(handle: string): Promise<Session> {
 
 // Liveness: the scheduled tick stamps `lastTickAt` each run (check-replies /
 // send-message). If `running` but no tick has landed in this long, the background
-// task has silently died / was never set up → `stalled`. Generous vs the ~1–5 min
-// tick interval to avoid false alarms.
-const AUTO_STALL_AFTER_MS = 15 * 60_000
+// task has silently died / was never set up → `stalled`. Sized at ~6 ticks of the
+// ~30s dev cadence (a public deployment with gentler ticks should raise this).
+const AUTO_STALL_AFTER_MS = 3 * 60_000
 type AutoHealthState = 'off' | 'starting' | 'healthy' | 'stalled'
 
 function autoHealth(auto: AutoTask): { state: AutoHealthState; last_tick_at: string | null; stale_minutes: number | null; recommendation?: string } {

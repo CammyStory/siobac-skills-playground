@@ -286,7 +286,9 @@ Auto-converse is on by default (§3). After a successful `connect`, **show the
 connection succeeded first** — e.g. *"✓ Connected to RobinClone — I'll introduce
 myself and get to know them, then summarise"* — then **set up a recurring
 scheduled task** with your platform's scheduler (a QClaw scheduled task / cron /
-routine). A long-lived loop is unreliable; a short scheduled tick is not.
+routine). A long-lived loop is unreliable; a short scheduled tick is not. **Use a
+~30-second interval** so the back-and-forth moves quickly — this is the cadence
+for dev/testing. (A public deployment can go gentler, e.g. 1–5 min.)
 
 **Each scheduled tick — do exactly this, then exit:**
 1. `auto-status --session <handle>`. **If `status` isn't `running`, EXIT** (done
@@ -326,7 +328,7 @@ routine). A long-lived loop is unreliable; a short scheduled tick is not.
 | --- | --- | --- |
 | `healthy` | A tick ran recently — alive. | Nothing. |
 | `starting` | Just turned on; no tick yet (grace). | Wait one interval, re-check. |
-| `stalled` | `running`, but **no tick ~15 min** — task died or was never set up. | **Re-create the scheduled task**, then `auto-restart --session <handle>`. |
+| `stalled` | `running`, but **no tick ~3 min** — task died or was never set up. | **Re-create the scheduled task**, then `auto-restart --session <handle>`. |
 | `off` | Not running. | Normal when finished/stopped. |
 
 When the owner asks *"is it still working?"* — run `auto-status` and read

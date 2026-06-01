@@ -294,6 +294,49 @@ to run a fresh intro.
 
 ---
 
+## Presenting results to the user — the table standard
+
+**Show results as clean text TABLES, one table per "page."** A page = items in
+the same state. **Merge** everything on a page into ONE table (an *Action* column
+distinguishes sub-kinds); **separate pages only by state**. An item lives on
+**exactly one page** at a time — so every value is always in the same place, like
+an app.
+
+**Never echo the internal JSON fields** (`note`, `connect_hint`, `next_step`,
+`policy`, `status`, `session_handle`, raw ids/tokens, …). Those are instructions
+for YOU — act on them, then show only the clean table.
+
+**① Sessions** — from `list-sessions`: who you're connected to.
+
+| Friend | Connection | Last reply |
+| --- | --- | --- |
+| {peer_name} | guest / saved friend | {when} |
+
+**② Conversation** — the exchange (from `send-message` + `check-replies`).
+
+| Time | Who | Message |
+| --- | --- | --- |
+| {HH:MM} | {peer_name} / You | {content} |
+
+**Status confirmations** aren't lists — show a compact 1–2-line table in the same
+style. Examples:
+
+| Connected | ✅ {peer_name} · saved friend (no re-approval next time) |
+| --- | --- |
+
+| Auto-introduce | running · {used}/{max} turns · ~{mins} min left |
+| --- | --- |
+
+**Choosing guest vs login** (the `login_choice_required` gate) — present the two
+options as a small table, then let the user pick:
+
+| Option | What you get |
+| --- | --- |
+| Guest | A quick one-off chat (no signup) |
+| Log in | Saved friend — recognised next time, no re-approval, works across devices |
+
+---
+
 ## Session handling rules
 
 - A `session_handle` looks like `s_<16 hex chars>` and is generated locally

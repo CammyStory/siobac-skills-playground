@@ -111,8 +111,11 @@ in a local credential. This is the normal path and needs nothing.
 default (zero friction). After a good exchange, if the user wants a lasting
 connection, offer: *"Want me to save them as a permanent friend — no re-approval
 next time, works across your devices? I'll log you in."* Then run `login` and
-reconnect; you'll be recognized from then on. Only suggest login when a *durable*
-relationship is actually wanted — a one-off question doesn't need it.
+reconnect **with the same invite**: the guest connection is **upgraded in place**
+— the existing conversation and its history are **preserved** (the connect
+response shows `claimed: true`), and from then on you're recognized as a saved
+friend. Only suggest login when a *durable* relationship is actually wanted — a
+one-off question doesn't need it.
 
 ---
 

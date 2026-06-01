@@ -105,11 +105,23 @@ async function cmdConnect(flags) {
     // If logged in, send the agent:connect bearer → registered (friendship)
     // connect. Otherwise this is a guest connect (today's behaviour).
     const bearer = await loginBearer();
+    // When logged in, present any prior (e.g. guest) session's creds for this
+    // invite so the server can CLAIM/upgrade that connection in place — keeping
+    // its conversation/history — instead of starting a fresh one.
+    let claim = {};
+    if (bearer) {
+        const prior = (await listSessions())
+            .filter((s) => s.slug === slug && s.host === host)
+            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+        if (prior)
+            claim = { client_user_id: prior.clientUserId, client_secret: prior.clientSecret };
+    }
     const res = await connect(host, slug, {
         your_agent_name,
         your_owner_name,
         introduction,
         purpose_hint,
+        ...claim,
     }, bearer ?? undefined);
     if (res.status === 'active' || res.status === 'reauthorized' || res.status === 'already_connected') {
         const session = await persistFromConnect(res, slug, host);
@@ -120,8 +132,11 @@ async function cmdConnect(flags) {
             token_expires_at: session.tokenExpiresAt,
             conversation_id: session.conversationId,
             registered: res.registered ?? false,
+            ...(res.claimed ? { claimed: true } : {}),
             ...(res.registered
-                ? { note: 'Registered friendship: you are saved as a friend — reconnecting later (while logged in) needs no re-approval and survives reinstalls.' }
+                ? { note: res.claimed
+                        ? 'Upgraded: your earlier guest conversation is now a SAVED FRIENDSHIP — same history, recognized next time (no re-approval), works across devices.'
+                        : 'Registered friendship: you are saved as a friend — reconnecting later (while logged in) needs no re-approval and survives reinstalls.' }
                 : {}),
         });
     }

@@ -42,6 +42,9 @@ export interface ConnectResponse {
   // Set when the connection was made in login mode (a registered agent
   // friendship) rather than as a guest session.
   registered?: boolean
+  // Set when a pre-existing guest connection was upgraded in place into a
+  // registered friendship (same conversation/history preserved).
+  claimed?: boolean
   [k: string]: unknown
 }
 

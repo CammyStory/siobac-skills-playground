@@ -121,7 +121,8 @@ either side connected as a logged-in agent or as a guest.
   auto-introducing"* → `auto-config --disable` (off for future connections) or
   `auto-stop --session <handle>` (this one). `auto-config --enable` turns the
   default back on; `auto-start --session <handle>` manually engages one session
-  if the default was disabled.
+  if the default was disabled. **`logout` also stops any running auto-converse**
+  before it completes.
 
 The step-by-step loop, guardrails, health check, and handback live in §5.
 

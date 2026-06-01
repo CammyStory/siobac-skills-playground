@@ -376,8 +376,29 @@ async function cmdLogin(flags) {
     throw makeError('expired_token', 'device authorization expired before approval. Run `login` again.');
 }
 async function cmdLogout() {
+    // Stop any running auto-converse BEFORE clearing auth, so a scheduled run can't
+    // keep driving conversations after the owner logged out (its next tick reads
+    // status != running and exits). Best-effort: never block logout on it.
+    let autoStopped = 0;
+    try {
+        for (const s of await listSessions()) {
+            if (s.auto?.status === 'running') {
+                await updateSession(s.handle, { auto: { ...s.auto, status: 'off' } });
+                autoStopped++;
+            }
+        }
+    }
+    catch { /* don't fail logout over auto-converse cleanup */ }
     await clearAuth();
-    ok({ ok: true, status: 'logged_out', auth_file_path: AUTH_FILE });
+    ok({
+        ok: true,
+        status: 'logged_out',
+        auth_file_path: AUTH_FILE,
+        auto_converse_stopped: autoStopped,
+        ...(autoStopped > 0
+            ? { next_step: `Auto-converse was stopped on ${autoStopped} session(s) as part of logout. Also remove any recurring scheduled task from your platform.` }
+            : {}),
+    });
 }
 // ── Auto-converse (Phase 1: toggle + status; fixed policy) ─────────────────
 async function requireSession(handle) {

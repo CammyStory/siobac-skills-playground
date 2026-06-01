@@ -171,11 +171,11 @@ export async function loadAutoReply() {
         if (e.code !== 'ENOENT')
             throw e;
     }
-    // Default ON: auto-reply is part of the agent's initial design, not something
-    // the owner opts into. Only an explicit `auto-reply-stop` (saved status:'off')
-    // turns it off. So a fresh / never-touched state is RUNNING — the agent never
-    // has to ask "should I turn auto-reply on?".
-    return { status: 'running', repliesSent: 0 };
+    // No state on disk → OFF. "Auto-reply on by default" is materialised at LOGIN
+    // (ensureAutoReplyDefaultOn writes a running state), NOT by this default — so a
+    // logged-out / cleared state correctly reads as off, and logout (which deletes
+    // this file) leaves auto-reply stopped until the next login turns it back on.
+    return { status: 'off', repliesSent: 0 };
 }
 export async function saveAutoReply(state) {
     await ensureDir();
@@ -184,6 +184,17 @@ export async function saveAutoReply(state) {
         await fs.chmod(AUTOREPLY_FILE, 0o600);
     }
     catch { }
+}
+// Stop + clear auto-reply state. Called on logout so the scheduled task halts
+// (its next tick reads off and exits) and the next login re-enables the default.
+export async function clearAutoReply() {
+    try {
+        await fs.unlink(AUTOREPLY_FILE);
+    }
+    catch (e) {
+        if (e.code !== 'ENOENT')
+            throw e;
+    }
 }
 // On login, materialise the default-ON auto-reply state with a real startedAt —
 // so `auto-reply-status` shows running (healthy lifecycle) right after login,

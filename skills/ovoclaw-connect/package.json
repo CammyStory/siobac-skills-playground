@@ -1,6 +1,6 @@
 {
   "name": "ovoclaw-connect",
-  "version": "0.9.15",
+  "version": "0.9.16",
   "description": "CLI executable skill that lets shell-capable AI agents connect to an existing OvOclaw shared agent via an invite URL or slug. Not an MCP server. Does not share or serve the current local agent.",
   "license": "MIT",
   "type": "module",

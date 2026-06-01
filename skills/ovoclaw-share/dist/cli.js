@@ -3,7 +3,7 @@ import { promises as fs, constants as fsConstants } from 'node:fs';
 import { platform, arch } from 'node:os';
 import { parseArgs, requireString, optionalString, CliError, } from './argparse.js';
 import * as api from './api.js';
-import { STATE_DIR, AUTH_FILE, loadAuth, saveAuth, clearAuth, loadBoundAgent, saveBoundAgent, isAuthFileWriteable, loadAutoReply, saveAutoReply, ensureAutoReplyDefaultOn, } from './state.js';
+import { STATE_DIR, AUTH_FILE, loadAuth, saveAuth, clearAuth, loadBoundAgent, saveBoundAgent, isAuthFileWriteable, loadAutoReply, saveAutoReply, ensureAutoReplyDefaultOn, clearAutoReply, } from './state.js';
 import { SKILL_NAME, SKILL_VERSION } from './version.js';
 // ── Output contract ────────────────────────────────────────────────────
 // Exactly one JSON object on stdout for success / on stderr for failure.
@@ -286,8 +286,25 @@ async function cmdLogin(flags) {
     throw api.makeApiError('expired_token', 'device authorization expired before approval. Run `login` again.');
 }
 async function cmdLogout() {
+    // Stop the auto-reply task BEFORE clearing auth, so a scheduled run can't keep
+    // firing against a logged-out account (its next tick reads no/off state and
+    // exits). Best-effort: never block logout on it.
+    let autoReplyWasRunning = false;
+    try {
+        autoReplyWasRunning = (await loadAutoReply()).status === 'running';
+        await clearAutoReply();
+    }
+    catch { /* don't fail logout over auto-reply cleanup */ }
     await clearAuth();
-    ok({ ok: true, status: 'logged_out', auth_file_path: AUTH_FILE });
+    ok({
+        ok: true,
+        status: 'logged_out',
+        auth_file_path: AUTH_FILE,
+        auto_reply_stopped: autoReplyWasRunning,
+        next_step: autoReplyWasRunning
+            ? 'Auto-reply was turned OFF as part of logout. Also remove the recurring scheduled task from your platform — the skill can only flip the flag, not delete the platform job.'
+            : undefined,
+    });
 }
 // ── Owner-side commands (wired to apps/server in phase 3) ──
 // Parse a tri-state --requires-approval flag:

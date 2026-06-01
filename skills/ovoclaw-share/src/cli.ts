@@ -20,6 +20,7 @@ import {
   loadAutoReply,
   saveAutoReply,
   ensureAutoReplyDefaultOn,
+  clearAutoReply,
   type AuthState,
   type AutoReplyState,
 } from './state.js'
@@ -343,8 +344,24 @@ async function cmdLogin(flags: Record<string, string | true>) {
 }
 
 async function cmdLogout() {
+  // Stop the auto-reply task BEFORE clearing auth, so a scheduled run can't keep
+  // firing against a logged-out account (its next tick reads no/off state and
+  // exits). Best-effort: never block logout on it.
+  let autoReplyWasRunning = false
+  try {
+    autoReplyWasRunning = (await loadAutoReply()).status === 'running'
+    await clearAutoReply()
+  } catch { /* don't fail logout over auto-reply cleanup */ }
   await clearAuth()
-  ok({ ok: true, status: 'logged_out', auth_file_path: AUTH_FILE })
+  ok({
+    ok: true,
+    status: 'logged_out',
+    auth_file_path: AUTH_FILE,
+    auto_reply_stopped: autoReplyWasRunning,
+    next_step: autoReplyWasRunning
+      ? 'Auto-reply was turned OFF as part of logout. Also remove the recurring scheduled task from your platform — the skill can only flip the flag, not delete the platform job.'
+      : undefined,
+  })
 }
 
 // ── Owner-side commands (wired to apps/server in phase 3) ──

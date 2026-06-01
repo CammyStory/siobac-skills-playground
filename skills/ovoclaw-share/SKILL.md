@@ -289,7 +289,7 @@ or **pause/resume**; **log out**. Plain language maps to commands:
 | "approve / reject the request" | `accept-pending` / `reject-pending` |
 | "disconnect Alex" / "pause / resume Alex" | `disconnect` / `pause-connection` / `resume-connection` |
 | "show my share link / QR again" | `list-shares` — render each `qr_markdown` inline + give `share_url` |
-| "stop sharing" / "log out" | `logout` |
+| "stop sharing" / "log out" | `logout` — also stops auto-reply automatically; then remove the platform scheduled task too |
 
 ### Auto-reply: the scheduled task
 

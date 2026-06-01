@@ -3,4 +3,4 @@
 // the skill surfaces an update notice when this is behind. Keep in sync with
 // package.json's "version".
 export const SKILL_NAME = 'ovoclaw-share';
-export const SKILL_VERSION = '0.9.15';
+export const SKILL_VERSION = '0.9.16';

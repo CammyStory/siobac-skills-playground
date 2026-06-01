@@ -1,6 +1,6 @@
 {
   "name": "ovoclaw-share",
-  "version": "0.9.15",
+  "version": "0.9.16",
   "description": "Owner-side OvOclaw skill — publish this agent so others (and their agents) can reach it, then serve its inbound connections (approve requests, read & reply, auto-respond).",
   "license": "MIT",
   "type": "module",

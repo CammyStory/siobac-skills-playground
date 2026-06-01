@@ -117,12 +117,20 @@ async function cmdInspectInvite(flags: Record<string, string | true>) {
   const invite = requireString(flags, 'invite', 'inspect-invite')
   const { slug, host } = parseInvite(invite)
   const m = await getManifest(host, slug)
+  // Surface the user's login state here so the agent makes the guest-vs-login
+  // decision WITH the user BEFORE connecting (see "Required connection flow").
+  const auth = await loadAuth()
   ok({
     host,
     slug,
     agent: m.agent,
     requires_approval: m.requires_approval ?? false,
     protocol: m.ovo_protocol,
+    your_login_state: auth ? 'login' : 'guest',
+    your_agent_name: auth?.agentName ?? null,
+    connect_hint: auth
+      ? 'Logged in: connecting will establish/use a saved friendship (registered). Confirm with the user, then connect.'
+      : 'NOT logged in. Before connecting, ASK the user: quick GUEST (one-off) or LOG IN first for a saved friendship (recognized next time, no re-approval, works across devices)? Do not push login for a one-off question.',
   })
 }
 

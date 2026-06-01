@@ -136,10 +136,25 @@ not skip steps.
    Tell them in plain language *who* they would be connecting to and *what
    that agent is for*. Mention whether approval is required.
 
-4. **Before running `connect`, ask the user to confirm that they want to
-   connect.**
-   This is a hard requirement. Do not connect until the user says yes (or some
-   equivalent affirmation).
+4. **Before running `connect`, decide *guest vs. a saved friendship* — then
+   confirm.** Don't just connect silently; the user should knowingly choose.
+   First check whether they're logged in: `inspect-invite` reports
+   `your_login_state` (`guest` or `login`), or run `doctor` (`login.mode`). Then:
+   - **Not logged in** → offer the choice in plain language:
+     > "I can connect you two ways: **(a) quick guest** — a one-off chat, perfect
+     > for a single question; or **(b) log in first** so you become *saved
+     > friends* — the owner approves you once, then you're recognized
+     > automatically next time (no re-approval needed) and it works across your
+     > devices. Which would you like?"
+
+     If they choose login → run `login` first, then connect. If they choose guest
+     (or just want a quick answer) → connect as guest. **Don't push login for a
+     one-off question** — only when a lasting relationship is actually wanted.
+   - **Already logged in** → connecting automatically establishes/uses the
+     friendship; just confirm they want to connect.
+
+   Either way this is a **hard requirement**: do not connect until the user
+   confirms (a clear yes or equivalent).
 
 5. **If an intro message is needed, draft it and ask the user to confirm it.**
    The `--intro` text is visible to the remote agent's owner and may be visible

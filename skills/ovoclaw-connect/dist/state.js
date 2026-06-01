@@ -91,6 +91,46 @@ export async function updateSession(handle, patch) {
 export function newHandle() {
     return 's_' + randomBytes(8).toString('hex');
 }
+// ── Global auto-converse preference ────────────────────────────────────────
+// Auto-converse is the agent's DEFAULT behaviour — when you connect, your agent
+// and theirs introduce themselves automatically. So this defaults to ENABLED
+// with no setup question; the owner only ever sets it to turn it OFF. Stored
+// separately from sessions so it survives reconnects. `configuredAt` present =
+// the owner has explicitly changed it.
+export const CONFIG_FILE = join(STATE_DIR, 'config.json');
+export async function loadConfig() {
+    try {
+        const raw = await fs.readFile(CONFIG_FILE, 'utf8');
+        const p = JSON.parse(raw);
+        if (p && typeof p === 'object' && p.autoMode && typeof p.autoMode === 'object') {
+            return {
+                autoMode: {
+                    // Only an explicit `enabled: false` turns it off; anything else is on.
+                    enabled: p.autoMode.enabled !== false,
+                    configuredAt: typeof p.autoMode.configuredAt === 'string' ? p.autoMode.configuredAt : undefined,
+                },
+            };
+        }
+    }
+    catch (e) {
+        if (e.code !== 'ENOENT')
+            throw e;
+    }
+    // No config yet → ON by default (auto-converse is the agent's default).
+    return { autoMode: { enabled: true } };
+}
+export async function saveConfig(cfg) {
+    await fs.mkdir(DIR, { recursive: true, mode: 0o700 });
+    try {
+        await fs.chmod(DIR, 0o700);
+    }
+    catch { }
+    await fs.writeFile(CONFIG_FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+    try {
+        await fs.chmod(CONFIG_FILE, 0o600);
+    }
+    catch { }
+}
 // ── Login-mode auth (registered connector) ────────────────────────────────
 // Optional: present only when the user runs `login`. Guest mode never touches
 // this. Stored separately from sessions.json. Mirrors the share skill's backup

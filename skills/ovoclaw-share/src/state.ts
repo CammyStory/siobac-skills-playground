@@ -138,3 +138,42 @@ export async function isAuthFileWriteable(): Promise<{ ok: boolean; reason?: str
     return { ok: false, reason: (e as Error).message }
   }
 }
+
+// ── Auto-reply (owner side) state ──────────────────────────────────────────
+// The owner's scheduled auto-reply. Stored once per install (the skill is bound
+// to one agent). The actual answering runs in the platform scheduler; this is
+// the on/off flag + status the owner can start/stop/check, and which the
+// scheduled run reads (answer only while running) and updates: check-inbox
+// stamps lastCheckedAt and respond bumps repliesSent — both only while running.
+export const AUTOREPLY_FILE = join(STATE_DIR, 'autoreply.json')
+export type AutoReplyStatus = 'running' | 'off'
+export interface AutoReplyState {
+  status: AutoReplyStatus
+  startedAt?: string       // ISO when turned on
+  lastCheckedAt?: string   // ISO of the most recent check-inbox while running
+  repliesSent: number      // cumulative replies sent since started
+}
+
+export async function loadAutoReply(): Promise<AutoReplyState> {
+  try {
+    const raw = await fs.readFile(AUTOREPLY_FILE, 'utf8')
+    const p = JSON.parse(raw)
+    if (p && typeof p === 'object' && (p.status === 'running' || p.status === 'off')) {
+      return {
+        status: p.status,
+        startedAt: typeof p.startedAt === 'string' ? p.startedAt : undefined,
+        lastCheckedAt: typeof p.lastCheckedAt === 'string' ? p.lastCheckedAt : undefined,
+        repliesSent: typeof p.repliesSent === 'number' ? p.repliesSent : 0,
+      }
+    }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
+  }
+  return { status: 'off', repliesSent: 0 }
+}
+
+export async function saveAutoReply(state: AutoReplyState): Promise<void> {
+  await ensureDir()
+  await fs.writeFile(AUTOREPLY_FILE, JSON.stringify(state, null, 2), { mode: 0o600 })
+  try { await fs.chmod(AUTOREPLY_FILE, 0o600) } catch {}
+}

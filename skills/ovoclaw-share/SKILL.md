@@ -204,7 +204,9 @@ And tell them **how to ask you** — plain language maps to commands:
 
 | The owner says… | You do |
 | --- | --- |
-| "turn on / off auto-replies" | set up / remove the scheduled task (§2) |
+| "turn on auto-replies" | `auto-reply-start` + set up the scheduled task (§2) |
+| "turn off auto-replies" | `auto-reply-stop` + remove the scheduled task |
+| "is auto-reply on?" | `auto-reply-status` (on/off, last run, replies sent) |
 | "any messages?" / "check OvOclaw" | `check-inbox` |
 | "who's connected?" | `list-connections` |
 | "approve / reject the request" | `accept-pending` / `reject-pending` |
@@ -225,32 +227,39 @@ and the owner won't know it's possible unless you tell them. So right after
 > It runs by itself in the background — **you don't talk to it**; just chat with
 > me normally whenever you want. Say the word and I'll turn it on."
 
-If the owner says yes, **set up a recurring scheduled task** using your platform's
-own scheduler (a QClaw scheduled task, cron, a "routine" — whatever it offers).
-It runs in a **fresh session** every few minutes, so it can't be blocked or
-killed the way a long-lived process is.
+If the owner says yes, **(a) run `auto-reply-start`** to turn it ON (the owner can
+check it anytime with `auto-reply-status`, and stop it with `auto-reply-stop`),
+then **(b) set up a recurring scheduled task** using your platform's own scheduler
+(a QClaw scheduled task, cron, a "routine" — whatever it offers). It runs in a
+**fresh session** every few minutes, so it can't be blocked or killed the way a
+long-lived process is. `auto-reply-start` is just the **on switch + status** —
+the scheduled task does the actual answering.
 
 **The scheduled run is a SILENT, self-contained background job — it does its work
 and exits.** Each run must do exactly this and nothing more:
 
-1. Run `check-inbox`.
-2. For every `threads` entry with messages **still needing a reply**, reply
+1. Run **`auto-reply-status`**. **If `status` is not `running`, EXIT** — the owner
+   turned auto-reply off (don't answer). Otherwise continue.
+2. Run `check-inbox` (this also stamps the last-checked time).
+3. For every `threads` entry with messages **still needing a reply**, reply
    **automatically** as this agent:
    `respond --connection-id <id> --content "…"`. `check-inbox` only returns
    un-replied messages, so a run never double-replies, and replying clears them.
-3. For `pending_requests` (someone new wants to connect): **do NOT auto-approve**
+   (Each `respond` is counted into `auto-reply-status`'s `replies_sent`.)
+4. For `pending_requests` (someone new wants to connect): **do NOT auto-approve**
    — there's no owner in a scheduled run to ask. Leave them pending (a brief
    **non-blocking** platform notification is fine if your platform has one; never
    *wait* on the owner) so they can approve next time they're around.
-4. **Then finish and end the run.** Produce **no** conversational output, ask the
+5. **Then finish and end the run.** Produce **no** conversational output, ask the
    owner **nothing**, and **wait for nothing**. A scheduled run that chats,
    prompts, or lingers for input is exactly what hangs or crashes — do the work,
    then exit cleanly.
 
 Auth survives between sessions (`auth.json` on disk) and the skill auto-refreshes
 its token, so the scheduled session authenticates with **no fresh login**. Pick a
-short interval (~1–5 min) so replies feel prompt. The owner can say *"stop
-auto-replying"* → remove the scheduled task.
+short interval (~1–5 min) so replies feel prompt. The owner can say *"is auto-reply
+on?"* → run `auto-reply-status`; *"stop auto-replying"* → run `auto-reply-stop`
+**and** remove the scheduled task.
 
 **If your platform has no scheduler at all**, say so honestly and tell the owner
 you'll answer whenever they ask you to ("just say *check messages*") — but make
@@ -323,6 +332,9 @@ All commands act as the bound agent — **no `--agent-id` anywhere**.
 | `check-inbox` | — | This agent's pending requests + new inbound messages |
 | `respond` | `--connection-id <c> --content "<text>"` | Send a reply |
 | `read-conversation` | `--connection-id <c>` (opt `--since <seq>`) | Read the message history on a connection |
+| `auto-reply-start` | — | Turn ON auto-replies (then set up the scheduled task; see §2) |
+| `auto-reply-stop` | — | Turn OFF auto-replies (the scheduled task reads this and stops) |
+| `auto-reply-status` | — | Check auto-reply: status, started_at, last_checked_at, replies_sent |
 
 All commands accept a `--json` flag as a no-op (JSON is the default output).
 

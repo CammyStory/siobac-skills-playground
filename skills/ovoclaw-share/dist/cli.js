@@ -3,7 +3,7 @@ import { promises as fs, constants as fsConstants } from 'node:fs';
 import { platform, arch } from 'node:os';
 import { parseArgs, requireString, optionalString, CliError, } from './argparse.js';
 import * as api from './api.js';
-import { STATE_DIR, AUTH_FILE, loadAuth, saveAuth, clearAuth, loadBoundAgent, saveBoundAgent, isAuthFileWriteable, } from './state.js';
+import { STATE_DIR, AUTH_FILE, loadAuth, saveAuth, clearAuth, loadBoundAgent, saveBoundAgent, isAuthFileWriteable, loadAutoReply, saveAutoReply, } from './state.js';
 import { SKILL_NAME, SKILL_VERSION } from './version.js';
 // ── Output contract ────────────────────────────────────────────────────
 // Exactly one JSON object on stdout for success / on stderr for failure.
@@ -433,8 +433,15 @@ async function cmdCheckInbox(flags) {
     // Auth is enough — the server scopes the inbox to the bound agent.
     const auth = await requireAuth();
     const inbox = await api.fetchInbox(auth.accessToken);
+    // While auto-reply is ON, the scheduled tick calls check-inbox each run —
+    // stamp last-checked so `auto-reply-status` reflects liveness.
+    const ar = await loadAutoReply();
+    if (ar.status === 'running') {
+        await saveAutoReply({ ...ar, lastCheckedAt: new Date().toISOString() });
+    }
     ok({
         status: 'ok',
+        auto_reply: ar.status,
         pending_count: inbox.pending_requests.length,
         unread_count: inbox.new_messages.length,
         thread_count: inbox.threads.length,
@@ -454,7 +461,47 @@ async function cmdRespond(flags) {
     const content = requireString(flags, 'content', 'respond');
     const { auth, agentId } = await requireBoundAgent();
     const result = await api.postReply(auth.accessToken, agentId, connectionId, content);
+    // Count auto-replies so `auto-reply-status` shows how many went out.
+    const ar = await loadAutoReply();
+    if (ar.status === 'running') {
+        await saveAutoReply({ ...ar, repliesSent: ar.repliesSent + 1 });
+    }
     ok({ status: 'sent', agent_id: agentId, connection_id: connectionId, ...result });
+}
+// ── Auto-reply controls (owner) ────────────────────────────────────────────
+function autoReplyView(ar) {
+    return {
+        auto_reply: {
+            status: ar.status,
+            started_at: ar.startedAt ?? null,
+            last_checked_at: ar.lastCheckedAt ?? null,
+            replies_sent: ar.repliesSent,
+        },
+    };
+}
+async function cmdAutoReplyStart() {
+    await requireBoundAgent(); // must be logged in + bound to an agent
+    const ar = { status: 'running', startedAt: new Date().toISOString(), repliesSent: 0 };
+    await saveAutoReply(ar);
+    ok({
+        status: 'auto_reply_started',
+        ...autoReplyView(ar),
+        next_step: 'Auto-reply is ON. The flag alone does NOT answer messages — now set up a recurring SCHEDULED TASK with your platform scheduler (a QClaw scheduled task / cron / routine) that EACH run: checks `auto-reply-status` → if running, runs `check-inbox` and `respond` to each un-replied thread → then exits silently (never auto-approve new connection requests). See "After login: serve the agent" in SKILL.md.',
+    });
+}
+async function cmdAutoReplyStop() {
+    const ar = await loadAutoReply();
+    const next = { ...ar, status: 'off' };
+    await saveAutoReply(next);
+    ok({
+        status: 'auto_reply_stopped',
+        ...autoReplyView(next),
+        note: 'Auto-reply is OFF — the scheduled task reads this and stops answering. You can also remove the scheduled task from your platform.',
+    });
+}
+async function cmdAutoReplyStatus() {
+    const ar = await loadAutoReply();
+    ok({ status: 'ok', ...autoReplyView(ar) });
 }
 async function cmdReadConversation(flags) {
     const connectionId = requireString(flags, 'connection-id', 'read-conversation');
@@ -512,6 +559,9 @@ function cmdHelp() {
             { name: 'check-inbox', description: 'This agent\'s pending requests + new inbound messages' },
             { name: 'respond', description: 'Reply on a connection. --connection-id <id> --content "<text>"' },
             { name: 'read-conversation', description: 'Read history on a connection. --connection-id <id> [--since <seq>]' },
+            { name: 'auto-reply-start', description: 'Turn ON auto-replies (then set up a scheduled task — see SKILL.md §2). The on switch + status the scheduled run reads.' },
+            { name: 'auto-reply-stop', description: 'Turn OFF auto-replies (the scheduled task reads this and stops answering).' },
+            { name: 'auto-reply-status', description: 'Check auto-reply: on/off, started_at, last_checked_at, replies_sent.' },
             { name: 'help', description: 'Print this JSON help' },
         ],
     });
@@ -547,6 +597,9 @@ async function main() {
         case 'check-inbox': return cmdCheckInbox(flags);
         case 'respond': return cmdRespond(flags);
         case 'read-conversation': return cmdReadConversation(flags);
+        case 'auto-reply-start': return cmdAutoReplyStart();
+        case 'auto-reply-stop': return cmdAutoReplyStop();
+        case 'auto-reply-status': return cmdAutoReplyStatus();
         default:
             throw new CliError(`Unknown subcommand: ${subcommand}. Run with --help to see available commands.`);
     }

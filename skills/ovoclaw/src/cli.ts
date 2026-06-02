@@ -24,6 +24,7 @@ import {
   deleteSession,
   updateSession,
   newSessionHandle,
+  migrateLegacyState,
   type AuthState,
 } from './state.js'
 import { parseInvite } from './invite.js'
@@ -1006,6 +1007,9 @@ async function main() {
   const subcommand = argv[0]
   const { flags } = parseArgs(argv.slice(1))
   delete flags.json // no-op flag, same convention as ovoclaw-connect
+
+  // One-time carry-over of a pre-rename login (~/.ovoclaw-share → ~/.ovoclaw).
+  await migrateLegacyState()
 
   switch (subcommand) {
     case 'doctor':            return cmdDoctor()

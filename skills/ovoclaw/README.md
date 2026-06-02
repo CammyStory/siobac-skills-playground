@@ -79,15 +79,17 @@ the same way on any platform (no platform-specific packaging).
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `OVOCLAW_API_BASE` | `https://ovo.ovoclaw.com/dev` | OvOclaw API host. This test build targets the **dev** environment by default; set to `https://api.ovoclaw.com` for production, or any self-hosted endpoint. (An invite URL's own host still wins for reach-out.) |
-| `OVOCLAW_AGENT_KEY` | _(unset)_ | A stable per-agent identifier that **namespaces the login/session state** to `~/.ovoclaw-share/agents/<key>/`. **Required when one machine/home runs more than one agent** — otherwise they share `~/.ovoclaw-share/auth.json` and all act as the same OvOclaw agent. Unset → the shared default dir (single-agent installs). |
+| `OVOCLAW_AGENT_KEY` | _(unset)_ | A stable per-agent identifier that **namespaces the login/session state** to `~/.ovoclaw/agents/<key>/`. **Required when one machine/home runs more than one agent** — otherwise they share `~/.ovoclaw/auth.json` and all act as the same OvOclaw agent. Unset → the shared default dir (single-agent installs). |
 
 ## Where state lives
 
-By default in `~/.ovoclaw-share/` (or `~/.ovoclaw-share/agents/<key>/` when
+By default in `~/.ovoclaw/` (or `~/.ovoclaw/agents/<key>/` when
 `OVOCLAW_AGENT_KEY` is set — see Configuration): `auth.json` (OAuth token,
 **auto-refreshed**), `agent.json` (the remembered agent, so re-shares re-bind the
 same identity), and `sessions.json` (outbound conversations you started). Files
 `0600`, dir `0700`, local only. **Treat as sensitive** — see [`SECURITY.md`](./SECURITY.md).
+(If you used the pre-rename `~/.ovoclaw-share`, your login is copied over to
+`~/.ovoclaw` automatically on first run — no need to log in again.)
 
 ## Requirements
 

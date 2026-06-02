@@ -5,8 +5,8 @@
 `ovoclaw` persists owner authentication at:
 
 ```
-~/.ovoclaw-share/auth.json   (file mode 0600)
-~/.ovoclaw-share/            (dir mode 0700)
+~/.ovoclaw/auth.json   (file mode 0600)
+~/.ovoclaw/            (dir mode 0700)
 ```
 
 Each entry holds:

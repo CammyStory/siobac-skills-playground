@@ -1,18 +1,22 @@
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-// Owner-side state, under ~/.ovoclaw-share/.
+// Owner-side state, under ~/.ovoclaw/ (named after the skill).
 //
 // PER-AGENT NAMESPACING. On a platform that runs MULTIPLE agents under the same
-// home, they would all read the SAME ~/.ovoclaw-share/auth.json and therefore
-// act as the SAME OvOclaw agent — one agent's login would leak to the others.
-// To keep each platform agent's login bound to ITS OWN session, the platform
-// sets `OVOCLAW_AGENT_KEY` to a stable per-agent identifier; state then lives in
-// ~/.ovoclaw-share/agents/<key>/ (its own auth.json / agent.json / sessions.json).
+// home, they would all read the SAME ~/.ovoclaw/auth.json and therefore act as
+// the SAME OvOclaw agent — one agent's login would leak to the others. To keep
+// each platform agent's login bound to ITS OWN session, the platform sets
+// `OVOCLAW_AGENT_KEY` to a stable per-agent identifier; state then lives in
+// ~/.ovoclaw/agents/<key>/ (its own auth.json / agent.json / sessions.json).
 // Unset → the shared default dir (single-agent installs, unchanged). A platform
 // running more than one agent MUST set this per agent.
 export const AGENT_KEY = (process.env.OVOCLAW_AGENT_KEY ?? '').trim();
-const STATE_BASE = join(homedir(), '.ovoclaw-share');
+export const STATE_BASE = join(homedir(), '.ovoclaw');
+// Where state lived before the skill was renamed ovoclaw-share → ovoclaw.
+// migrateLegacyState() copies an existing login over on first run so users
+// don't have to log in again after the rename.
+export const LEGACY_STATE_BASE = join(homedir(), '.ovoclaw-share');
 export const STATE_DIR = AGENT_KEY
     ? join(STATE_BASE, 'agents', AGENT_KEY.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 64) || 'default')
     : STATE_BASE;
@@ -227,3 +231,39 @@ export async function updateSession(handle, patch) {
     return all[handle];
 }
 export function newSessionHandle() { return 's_' + randomBytes(8).toString('hex'); }
+// One-time migration after the ovoclaw-share → ovoclaw rename: if the new state
+// dir has no auth yet but the legacy ~/.ovoclaw-share equivalent does, copy the
+// login (auth/agent/sessions) over so the user stays logged in. No-op once
+// migrated, for fresh users, or when there's nothing legacy to copy.
+export async function migrateLegacyState() {
+    try {
+        await fs.access(AUTH_FILE);
+        return;
+    }
+    catch { /* new dir has no auth — maybe migrate */ }
+    const legacyDir = STATE_DIR.replace(STATE_BASE, LEGACY_STATE_BASE);
+    if (legacyDir === STATE_DIR)
+        return;
+    try {
+        await fs.access(join(legacyDir, 'auth.json'));
+    }
+    catch {
+        return;
+    } // nothing legacy
+    await fs.mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
+    try {
+        await fs.chmod(STATE_DIR, 0o700);
+    }
+    catch { }
+    for (const f of ['auth.json', 'auth.json.bak', 'agent.json', 'sessions.json']) {
+        try {
+            const buf = await fs.readFile(join(legacyDir, f));
+            await fs.writeFile(join(STATE_DIR, f), buf, { mode: 0o600 });
+            try {
+                await fs.chmod(join(STATE_DIR, f), 0o600);
+            }
+            catch { }
+        }
+        catch { /* that file didn't exist in legacy — skip */ }
+    }
+}

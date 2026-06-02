@@ -77,7 +77,7 @@ node ovoclaw-skills-playground/skills/ovoclaw/dist/cli.js doctor
 
 ## 状态存放在哪里
 
-都在 `~/.ovoclaw-share/` 下：`auth.json`（OAuth 令牌，会 **自动刷新**）、`agent.json`（记住的 agent，
+都在 `~/.ovoclaw/` 下：`auth.json`（OAuth 令牌，会 **自动刷新**）、`agent.json`（记住的 agent，
 使每次重新分享都绑定同一身份）、以及 `sessions.json`（你发起的出站对话）。文件权限 `0600`、目录 `0700`，
 仅本地。**请视为敏感信息** —— 见 [`SECURITY.md`](./SECURITY.md)。
 

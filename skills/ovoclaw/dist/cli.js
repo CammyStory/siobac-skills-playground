@@ -3,7 +3,7 @@ import { promises as fs, constants as fsConstants } from 'node:fs';
 import { platform, arch } from 'node:os';
 import { parseArgs, requireString, optionalString, CliError, } from './argparse.js';
 import * as api from './api.js';
-import { STATE_DIR, AGENT_KEY, AUTH_FILE, loadAuth, saveAuth, clearAuth, loadBoundAgent, saveBoundAgent, isAuthFileWriteable, saveSession, getSession, listSessions, deleteSession, updateSession, newSessionHandle, } from './state.js';
+import { STATE_DIR, AGENT_KEY, AUTH_FILE, loadAuth, saveAuth, clearAuth, loadBoundAgent, saveBoundAgent, isAuthFileWriteable, saveSession, getSession, listSessions, deleteSession, updateSession, newSessionHandle, migrateLegacyState, } from './state.js';
 import { parseInvite } from './invite.js';
 import { SKILL_NAME, SKILL_VERSION } from './version.js';
 // ── Output contract ────────────────────────────────────────────────────
@@ -902,6 +902,8 @@ async function main() {
     const subcommand = argv[0];
     const { flags } = parseArgs(argv.slice(1));
     delete flags.json; // no-op flag, same convention as ovoclaw-connect
+    // One-time carry-over of a pre-rename login (~/.ovoclaw-share → ~/.ovoclaw).
+    await migrateLegacyState();
     switch (subcommand) {
         case 'doctor': return cmdDoctor();
         case 'guide': return cmdGuide(flags);

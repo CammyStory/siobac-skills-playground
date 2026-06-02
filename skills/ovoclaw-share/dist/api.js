@@ -136,7 +136,10 @@ async function jsonFetch(opts) {
 export async function requestDeviceCode(scope, agentHint) {
     const body = {
         client_id: 'ovoclaw-share-cli',
-        scope: scope ?? 'agent:share agent:respond',
+        // Unified skill: one login both serves (share/respond) AND reaches out as a
+        // registered agent (connect). The server gate grants each capability per
+        // scope; guest reach-out needs no token at all.
+        scope: scope ?? 'agent:share agent:respond agent:connect',
     };
     // Remembered agent from a prior share — the approval page auto-confirms it
     // when the logged-in account still owns a matching agent.
@@ -278,4 +281,71 @@ export async function submitMemory(bearer, agentId, connectionId, deltas) {
         bearer,
         body: { memory_deltas: deltas },
     });
+}
+function classifyInviteStatus(status, body) {
+    if (status === 400)
+        return 'invalid_request';
+    if (status === 401)
+        return 'session_expired';
+    if (status === 403)
+        return 'blocked_by_owner';
+    if (status === 404)
+        return 'invalid_invite';
+    if (status === 409)
+        return body?.error === 'agent_busy' || body?.error === 'queue_full' ? 'agent_busy' : 'agent_unavailable';
+    if (status === 429)
+        return body?.error === 'auth_blocked' ? 'auth_blocked' : 'rate_limited';
+    if (status >= 500)
+        return 'server_error';
+    return 'unknown';
+}
+// Full-URL fetch (no getApiBase prefix) with the same error normalization shape.
+async function inviteFetch(url, init) {
+    let res;
+    try {
+        res = await fetch(url, init);
+    }
+    catch (e) {
+        const cause = e.cause;
+        const reason = cause?.code || cause?.message || e.message || 'fetch failed';
+        throw makeApiError('network_error', `network_error: ${reason}`);
+    }
+    const text = await res.text();
+    let body;
+    try {
+        body = text ? JSON.parse(text) : {};
+    }
+    catch {
+        body = { raw: text };
+    }
+    if (!res.ok) {
+        const b = body;
+        const code = classifyInviteStatus(res.status, b);
+        throw makeApiError(code, `${code} (HTTP ${res.status}): ${b?.message || b?.error || res.statusText}`, { status: res.status, body });
+    }
+    return body;
+}
+export async function getManifest(host, slug) {
+    return inviteFetch(`${host}/manifest/${encodeURIComponent(slug)}`, { method: 'GET' });
+}
+// bearer: the owner login token → REGISTERED connect; omit → GUEST connect.
+export async function connectToInvite(host, slug, body, bearer) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (bearer)
+        headers['Authorization'] = `Bearer ${bearer}`;
+    return inviteFetch(`${host}/connect/${encodeURIComponent(slug)}`, {
+        method: 'POST', headers, body: JSON.stringify(body),
+    });
+}
+export async function pollConnect(host, slug, requestId) {
+    return inviteFetch(`${host}/connect/${encodeURIComponent(slug)}/poll/${encodeURIComponent(requestId)}`, { method: 'GET' });
+}
+export async function sendToConnection(host, token, content) {
+    return inviteFetch(`${host}/message`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ content }),
+    });
+}
+export async function pollConnectionReplies(host, token, sinceSeq, waitSeconds = 0) {
+    const params = new URLSearchParams({ since: String(sinceSeq), wait: String(waitSeconds) });
+    return inviteFetch(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
 }

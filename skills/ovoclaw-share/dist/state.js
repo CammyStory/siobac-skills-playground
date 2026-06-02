@@ -147,3 +147,72 @@ export async function isAuthFileWriteable() {
         return { ok: false, reason: e.message };
     }
 }
+// ── Reach-out sessions (active connections this agent started) ───────────
+// Stored alongside auth.json in the SAME state dir (the merged skill keeps one
+// home). A session holds the per-connection bearer (xext_) for /message+/poll.
+// Ported from ovoclaw-connect when the skills merged.
+import { randomBytes } from 'node:crypto';
+export const SESSIONS_FILE = join(STATE_DIR, 'sessions.json');
+const SESSION_HANDLE_RE = /^s_[0-9a-f]{16}$/;
+function isValidHandle(h) { return SESSION_HANDLE_RE.test(h); }
+async function readSessions() {
+    try {
+        const raw = await fs.readFile(SESSIONS_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        return typeof parsed === 'object' && parsed !== null ? parsed : {};
+    }
+    catch (e) {
+        if (e.code === 'ENOENT')
+            return {};
+        throw e;
+    }
+}
+async function writeSessions(data) {
+    await fs.mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
+    try {
+        await fs.chmod(STATE_DIR, 0o700);
+    }
+    catch { }
+    await fs.writeFile(SESSIONS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+    try {
+        await fs.chmod(SESSIONS_FILE, 0o600);
+    }
+    catch { }
+}
+export async function saveSession(s) {
+    if (!isValidHandle(s.handle))
+        throw new Error(`saveSession: invalid handle ${JSON.stringify(s.handle)}`);
+    const all = await readSessions();
+    all[s.handle] = s;
+    await writeSessions(all);
+}
+export async function getSession(handle) {
+    if (!isValidHandle(handle))
+        return null;
+    const all = await readSessions();
+    return Object.prototype.hasOwnProperty.call(all, handle) ? all[handle] : null;
+}
+export async function listSessions() {
+    const all = await readSessions();
+    return Object.entries(all).filter(([k]) => isValidHandle(k)).map(([, v]) => v);
+}
+export async function deleteSession(handle) {
+    if (!isValidHandle(handle))
+        return;
+    const all = await readSessions();
+    if (!Object.prototype.hasOwnProperty.call(all, handle))
+        return;
+    delete all[handle];
+    await writeSessions(all);
+}
+export async function updateSession(handle, patch) {
+    if (!isValidHandle(handle))
+        return null;
+    const all = await readSessions();
+    if (!Object.prototype.hasOwnProperty.call(all, handle))
+        return null;
+    all[handle] = { ...all[handle], ...patch };
+    await writeSessions(all);
+    return all[handle];
+}
+export function newSessionHandle() { return 's_' + randomBytes(8).toString('hex'); }

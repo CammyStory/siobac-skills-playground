@@ -22,6 +22,12 @@ export type ApiErrorCode =
   | 'server_not_ready'     // device-flow endpoints not deployed yet (404 on /oauth/*)
   | 'not_implemented_yet'  // CLI: command stubbed pending real implementation
   | 'cli_error'            // local CLI input error
+  // ── Reach-out (active connect) codes, from the merged connect transport ──
+  | 'invalid_invite'       // 404: unknown slug / invite_not_found
+  | 'agent_unavailable'    // 409: the shared agent is stopped/unavailable
+  | 'agent_busy'           // 409: agent_busy / queue_full (single-user mode)
+  | 'blocked_by_owner'     // 403: post-rejection cooldown on the connect side
+  | 'auth_blocked'         // 429: per-IP brute-force throttle
   | 'unknown'
 
 export interface ApiError extends Error {
@@ -203,7 +209,10 @@ export interface DeviceCodeResponse {
 export async function requestDeviceCode(scope?: string, agentHint?: string): Promise<DeviceCodeResponse> {
   const body: Record<string, unknown> = {
     client_id: 'ovoclaw-share-cli',
-    scope: scope ?? 'agent:share agent:respond',
+    // Unified skill: one login both serves (share/respond) AND reaches out as a
+    // registered agent (connect). The server gate grants each capability per
+    // scope; guest reach-out needs no token at all.
+    scope: scope ?? 'agent:share agent:respond agent:connect',
   }
   // Remembered agent from a prior share — the approval page auto-confirms it
   // when the logged-in account still owns a matching agent.
@@ -549,6 +558,104 @@ export async function submitMemory(
     bearer,
     body: { memory_deltas: deltas },
   })
+}
+
+// ── Reach-out transport (active connect) ─────────────────────────────
+// These talk to a FULL host (resolved from the invite by parseInvite), not
+// getApiBase(): an invite can point at any server/prefix. connect/manifest are
+// unauthenticated; message/poll use the per-connection bearer (xext_) returned
+// at connect. (A logged-in connect ALSO passes the owner login bearer so the
+// server makes it a REGISTERED friendship; guest connect passes none.)
+export interface Manifest {
+  agent: { id: string; name: string; description?: string; status?: string }
+  ovo_protocol?: string
+  requires_approval?: boolean
+  [k: string]: unknown
+}
+export type ConnectStatus =
+  | 'active' | 'awaiting_approval' | 'agent_unavailable' | 'agent_busy'
+  | 'already_connected' | 'reauthorized' | 'invalid_client_credentials'
+  | 'invalid_invite' | 'rate_limited' | 'blocked_by_owner'
+export interface ConnectResponse {
+  status: ConnectStatus
+  token?: string; token_expires_at?: string; client_secret?: string
+  your_user_id?: string; request_id?: string; conversation_id?: string
+  peer_name?: string; registered?: boolean; retry_after_seconds?: number
+  [k: string]: unknown
+}
+export interface ConnectInput {
+  your_agent_name?: string; your_owner_name?: string
+  introduction: string; purpose_hint?: string
+  client_user_id?: string; client_secret?: string
+}
+export interface SendMessageResponse {
+  ok: boolean; message: { id: string; seq: number; [k: string]: unknown }
+  agent_message?: unknown; reply_status?: 'received' | 'pending'
+  conversation_id?: string; your_user_id?: string; delivery?: unknown
+}
+export interface ReplyMessage {
+  id: string; seq: number; sender_user_id?: string; content: string; created_at: string
+  [k: string]: unknown
+}
+export interface PollRepliesResponse {
+  messages: ReplyMessage[]; last_seq: number; conversation_id?: string
+  your_user_id?: string; delivery?: unknown
+}
+
+function classifyInviteStatus(status: number, body: { error?: string } | undefined): ApiErrorCode {
+  if (status === 400) return 'invalid_request'
+  if (status === 401) return 'session_expired'
+  if (status === 403) return 'blocked_by_owner'
+  if (status === 404) return 'invalid_invite'
+  if (status === 409) return body?.error === 'agent_busy' || body?.error === 'queue_full' ? 'agent_busy' : 'agent_unavailable'
+  if (status === 429) return body?.error === 'auth_blocked' ? 'auth_blocked' : 'rate_limited'
+  if (status >= 500) return 'server_error'
+  return 'unknown'
+}
+
+// Full-URL fetch (no getApiBase prefix) with the same error normalization shape.
+async function inviteFetch<T>(url: string, init: RequestInit): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(url, init)
+  } catch (e) {
+    const cause = (e as Error & { cause?: { code?: string; message?: string } }).cause
+    const reason = cause?.code || cause?.message || (e as Error).message || 'fetch failed'
+    throw makeApiError('network_error', `network_error: ${reason}`)
+  }
+  const text = await res.text()
+  let body: unknown
+  try { body = text ? JSON.parse(text) : {} } catch { body = { raw: text } }
+  if (!res.ok) {
+    const b = body as { message?: string; error?: string } | undefined
+    const code = classifyInviteStatus(res.status, b)
+    throw makeApiError(code, `${code} (HTTP ${res.status}): ${b?.message || b?.error || res.statusText}`, { status: res.status, body })
+  }
+  return body as T
+}
+
+export async function getManifest(host: string, slug: string): Promise<Manifest> {
+  return inviteFetch<Manifest>(`${host}/manifest/${encodeURIComponent(slug)}`, { method: 'GET' })
+}
+// bearer: the owner login token → REGISTERED connect; omit → GUEST connect.
+export async function connectToInvite(host: string, slug: string, body: ConnectInput, bearer?: string): Promise<ConnectResponse> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (bearer) headers['Authorization'] = `Bearer ${bearer}`
+  return inviteFetch<ConnectResponse>(`${host}/connect/${encodeURIComponent(slug)}`, {
+    method: 'POST', headers, body: JSON.stringify(body),
+  })
+}
+export async function pollConnect(host: string, slug: string, requestId: string): Promise<ConnectResponse> {
+  return inviteFetch<ConnectResponse>(`${host}/connect/${encodeURIComponent(slug)}/poll/${encodeURIComponent(requestId)}`, { method: 'GET' })
+}
+export async function sendToConnection(host: string, token: string, content: string): Promise<SendMessageResponse> {
+  return inviteFetch<SendMessageResponse>(`${host}/message`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ content }),
+  })
+}
+export async function pollConnectionReplies(host: string, token: string, sinceSeq: number, waitSeconds = 0): Promise<PollRepliesResponse> {
+  const params = new URLSearchParams({ since: String(sinceSeq), wait: String(waitSeconds) })
+  return inviteFetch<PollRepliesResponse>(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } })
 }
 
 // Re-export the AuthState type for convenience in cli.ts.

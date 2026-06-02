@@ -17,8 +17,15 @@ import {
   loadBoundAgent,
   saveBoundAgent,
   isAuthFileWriteable,
+  saveSession,
+  getSession,
+  listSessions,
+  deleteSession,
+  updateSession,
+  newSessionHandle,
   type AuthState,
 } from './state.js'
+import { parseInvite } from './invite.js'
 import { SKILL_NAME, SKILL_VERSION } from './version.js'
 
 // ── Output contract ────────────────────────────────────────────────────
@@ -296,6 +303,15 @@ async function cmdLogin(flags: Record<string, string | true>) {
           boundAt: new Date().toISOString(),
         })
       }
+      // First-time setup nudge: has this agent been given a directive yet?
+      // Best-effort — never block login if the check fails.
+      let directiveSet = false
+      try {
+        if (auth.agentId) {
+          const d = await api.getDirective(auth.accessToken, auth.agentId)
+          directiveSet = !!(d.content && d.content.trim())
+        }
+      } catch { /* ignore */ }
       // Tell the agent which OvOclaw agent it's now bound to AND ask it to
       // remember — so on a fresh install (where the local agent.json may not
       // survive) it can recall this from its own memory and pass it as
@@ -309,6 +325,10 @@ async function cmdLogin(flags: Record<string, string | true>) {
         agent_id: auth.agentId,
         agent_name: agentName ?? null,
         note: 'This login is bound to a single agent. All commands act as that agent only.',
+        profile_setup_needed: !directiveSet,
+        next_step: directiveSet
+          ? 'Confirm with the owner that their PUBLIC PROFILE (name/description) still reflects who they are — outside agents read that — then `share-self`.'
+          : 'FIRST, design this agent before sharing (do not skip — it is what makes the agent represent the owner well): (1) write its private DIRECTIVE — the rules + purpose for how it should think and reply on the owner\'s behalf — and save it with `set-directive --content "…"`; (2) make sure the PUBLIC PROFILE (name/description) clearly says who the owner is, since outside agents read that to understand them. Then `share-self`. See "First-time setup" in SKILL.md.',
         remember: rememberLabel
           ? `You are now sharing the OvOclaw agent "${rememberLabel}" (id ${auth.agentId}). ` +
             `Record this in your durable memory as your OvOclaw agent. Next time you log in, ` +
@@ -404,7 +424,7 @@ async function cmdShareSelf(flags: Record<string, string | true>) {
     qr_url: qrUrlFor(invite.slug),
     qr_markdown: qrMarkdownFor(invite.slug),
     note: 'DISPLAY THE QR INLINE: render it as an image so the user sees a scannable QR, not a link — drop the ready-made `qr_markdown` straight into your reply (it is `![](qr_url)`). Also give `share_url` as a copyable link. Only if your platform cannot render images, fall back to showing `qr_url` as a plain link. (createInvite is idempotent — an already-shared agent returns its existing invite.)',
-    next_step: 'IMPORTANT: now offer to turn on AUTO-REPLIES (the owner likely does not know this is possible). Tell them you can answer incoming messages automatically via a scheduled task that checks every few minutes — and set it up if they agree. See "After login: serve the agent" in SKILL.md.',
+    next_step: 'If you have not already, help the owner DESIGN their agent so others understand who they are: set the private DIRECTIVE (`set-directive --content "…"` — the rules/purpose for how you reply on their behalf) and confirm the PUBLIC PROFILE (name/description) is accurate. Then, when a friend connects, use `recall` before replying and `remember` after (see "Talking in character" in SKILL.md).',
   })
 }
 
@@ -559,7 +579,7 @@ async function cmdReadConversation(flags: Record<string, string | true>) {
 // never change them; `remember` only writes friend-scoped memory.
 
 async function cmdRecall(flags: Record<string, string | true>) {
-  const connectionId = requireString(flags, 'connection-id', 'recall')
+  const connectionId = optionalString(flags, 'conversation') ?? requireString(flags, 'connection-id', 'recall')
   const { auth, agentId } = await requireBoundAgent()
   const ctx = await api.getTalkContext(auth.accessToken, agentId, connectionId)
   ok({
@@ -579,7 +599,7 @@ async function cmdRecall(flags: Record<string, string | true>) {
 }
 
 async function cmdRemember(flags: Record<string, string | true>) {
-  const connectionId = requireString(flags, 'connection-id', 'remember')
+  const connectionId = optionalString(flags, 'conversation') ?? requireString(flags, 'connection-id', 'remember')
   const { auth, agentId } = await requireBoundAgent()
   // The skill fills scope:'friend' + friend_id for every delta, so the agent
   // only supplies {kind, content, disclosure?, confidence?, op?, source_seq?}.
@@ -626,6 +646,178 @@ async function cmdSetDirective(flags: Record<string, string | true>) {
   ok({ status: 'ok', agent_id: agentId, updated: true })
 }
 
+// ── Reach out + unified conversations (merged from ovoclaw-connect) ──────
+// One agent is symmetric: it can be reached (passive) AND reach out (active).
+// A conversation handle disambiguates the transport: `s_…` = one I started
+// (connection bearer); anything else = a connection id I own (login token).
+
+function isActiveHandle(h: string): boolean { return /^s_[0-9a-f]{16}$/.test(h) }
+
+async function persistSession(res: api.ConnectResponse, slug: string, host: string): Promise<string> {
+  if (!res.token || !res.token_expires_at || !res.your_user_id || !res.client_secret) {
+    throw new CliError(`connect succeeded but the response is missing token fields (status ${res.status}).`)
+  }
+  const handle = newSessionHandle()
+  await saveSession({
+    handle, slug, host,
+    peerAgentName: res.peer_name,
+    token: res.token, tokenExpiresAt: res.token_expires_at,
+    clientUserId: res.your_user_id, clientSecret: res.client_secret,
+    conversationId: res.conversation_id, lastSeq: 0,
+    createdAt: new Date().toISOString(),
+  })
+  return handle
+}
+function sanitizeConnect(res: api.ConnectResponse): Record<string, unknown> {
+  const { token: _t, client_secret: _cs, ...safe } = res
+  return safe as Record<string, unknown>
+}
+
+async function cmdInspectInvite(flags: Record<string, string | true>) {
+  const invite = requireString(flags, 'invite', 'inspect-invite')
+  const { slug, host } = parseInvite(invite)
+  const m = await api.getManifest(host, slug)
+  const auth = await loadAuth()
+  ok({
+    status: 'ok', host, slug, agent: m.agent,
+    requires_approval: m.requires_approval ?? false,
+    your_login_state: auth?.agentId ? 'logged_in' : 'guest',
+  })
+}
+
+async function cmdConnect(flags: Record<string, string | true>) {
+  const invite = requireString(flags, 'invite', 'connect')
+  const introduction = requireString(flags, 'intro', 'connect')
+  const { slug, host } = parseInvite(invite)
+  const auth = await loadAuth()
+  const loggedIn = !!(auth && auth.agentId)
+  const guest = flags['guest'] === true || flags['guest'] === 'true' || flags['guest'] === ''
+  const existing = (await listSessions()).find((s) => s.slug === slug)
+
+  // Login-choice gate (per the owner's rule): logged-in → use the agent;
+  // logged-out + no --guest + no prior session → ASK login-or-guest.
+  if (!loggedIn && !guest && !existing) {
+    ok({
+      status: 'login_choice_required',
+      message: 'You are not logged in. Ask the owner: LOG IN so this agent reaches out as ITSELF (a saved, account-anchored friendship), OR connect once as an anonymous GUEST.',
+      options: {
+        login: 'run `login` (bind this agent), then `connect` again → registered friendship',
+        guest: 're-run `connect … --guest` → one-off anonymous connection, no account',
+      },
+    })
+  }
+
+  const bearer = loggedIn ? auth!.accessToken : undefined
+  const res = await api.connectToInvite(host, slug, {
+    your_agent_name: optionalString(flags, 'agent-name'),
+    your_owner_name: optionalString(flags, 'owner-name'),
+    introduction,
+    purpose_hint: optionalString(flags, 'purpose'),
+  }, bearer)
+
+  if (res.status === 'active' || res.status === 'reauthorized' || res.status === 'already_connected') {
+    const handle = await persistSession(res, slug, host)
+    ok({ status: res.status, conversation: handle, peer_name: res.peer_name ?? null, mode: bearer ? 'registered' : 'guest', token_expires_at: res.token_expires_at })
+  }
+  if (res.status === 'awaiting_approval') {
+    ok({ status: 'awaiting_approval', request_id: res.request_id, invite, hint: 'Poll `check-approval --invite <same> --request-id <id>`; when it turns active you get a `conversation` handle.' })
+  }
+  ok(sanitizeConnect(res))
+}
+
+async function cmdCheckApproval(flags: Record<string, string | true>) {
+  const invite = requireString(flags, 'invite', 'check-approval')
+  const requestId = requireString(flags, 'request-id', 'check-approval')
+  const { slug, host } = parseInvite(invite)
+  const res = await api.pollConnect(host, slug, requestId)
+  if (res.status === 'active') {
+    const handle = await persistSession(res, slug, host)
+    ok({ status: 'active', conversation: handle, peer_name: res.peer_name ?? null, token_expires_at: res.token_expires_at })
+  }
+  ok(sanitizeConnect(res))
+}
+
+async function cmdConversations(_flags: Record<string, string | true>) {
+  const auth = await loadAuth()
+  const conversations: Array<Record<string, unknown>> = []
+  if (auth && auth.agentId) {
+    const conns = await api.listConnections(auth.accessToken, auth.agentId)
+    for (const c of conns) {
+      conversations.push({ conversation: c.id, direction: 'inbound', started: 'they connected to me', peer: c.shadow_name ?? null, status: c.status, conversation_id: c.conversation_id, created_at: c.created_at })
+    }
+  }
+  for (const s of await listSessions()) {
+    conversations.push({ conversation: s.handle, direction: 'outbound', started: 'I connected out', peer: s.peerAgentName ?? null, slug: s.slug, host: s.host, created_at: s.createdAt, token_expires_at: s.tokenExpiresAt })
+  }
+  ok({ status: 'ok', logged_in: !!(auth && auth.agentId), count: conversations.length, conversations })
+}
+
+async function cmdRead(flags: Record<string, string | true>) {
+  const handle = requireString(flags, 'conversation', 'read')
+  if (isActiveHandle(handle)) {
+    const sess = await getSession(handle)
+    if (!sess) throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`)
+    const res = await api.pollConnectionReplies(sess.host, sess.token, 0, 0)
+    ok({ status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null, messages: res.messages, last_seq: res.last_seq, note: "Active side shows the OTHER agent's replies (the connector transport doesn't echo your own sent messages)." })
+  }
+  const { auth, agentId } = await requireBoundAgent()
+  const since = optionalString(flags, 'since')
+  const hist = await api.readConversation(auth.accessToken, agentId, handle, { since: since !== undefined ? Math.max(0, Number(since) || 0) : undefined })
+  ok({ status: 'ok', conversation: handle, direction: 'inbound', conversation_id: hist.conversation_id, message_count: hist.messages.length, last_seq: hist.last_seq, has_more: hist.has_more, messages: hist.messages })
+}
+
+async function cmdSend(flags: Record<string, string | true>) {
+  const handle = requireString(flags, 'conversation', 'send')
+  const message = requireString(flags, 'message', 'send')
+  if (isActiveHandle(handle)) {
+    const sess = await getSession(handle)
+    if (!sess) throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`)
+    const res = await api.sendToConnection(sess.host, sess.token, message)
+    ok({ status: 'sent', conversation: handle, direction: 'outbound', message_id: res.message?.id, seq: res.message?.seq, reply_status: res.reply_status })
+  }
+  const { auth, agentId } = await requireBoundAgent()
+  const res = await api.postReply(auth.accessToken, agentId, handle, message)
+  ok({ status: 'sent', conversation: handle, direction: 'inbound', ...res })
+}
+
+async function cmdCheck(_flags: Record<string, string | true>) {
+  const auth = await loadAuth()
+  const result: Record<string, unknown> = { status: 'ok' }
+  if (auth && auth.agentId) {
+    const inbox = await api.fetchInbox(auth.accessToken)
+    result.inbound = { pending_requests: inbox.pending_requests, threads: inbox.threads, unanswered_count: inbox.new_messages.length }
+  } else {
+    result.inbound = { note: 'not logged in — only outbound (guest) conversations checked' }
+  }
+  const outbound: Array<Record<string, unknown>> = []
+  for (const s of await listSessions()) {
+    try {
+      const res = await api.pollConnectionReplies(s.host, s.token, s.lastSeq, 0)
+      if (res.last_seq > s.lastSeq) await updateSession(s.handle, { lastSeq: res.last_seq })
+      if (res.messages.length) outbound.push({ conversation: s.handle, peer: s.peerAgentName ?? null, new_messages: res.messages, last_seq: res.last_seq })
+    } catch { /* a dead session shouldn't sink the whole check */ }
+  }
+  result.outbound = outbound
+  ok(result)
+}
+
+async function cmdRequests(_flags: Record<string, string | true>) {
+  const auth = await requireAuth()
+  const inbox = await api.fetchInbox(auth.accessToken)
+  ok({ status: 'ok', count: inbox.pending_requests.length, pending_requests: inbox.pending_requests })
+}
+
+async function cmdListSessions() {
+  const all = await listSessions()
+  ok({ status: 'ok', sessions: all.map((s) => ({ conversation: s.handle, peer: s.peerAgentName ?? null, slug: s.slug, host: s.host, expires_at: s.tokenExpiresAt, last_seq: s.lastSeq, created_at: s.createdAt })) })
+}
+
+async function cmdForgetSession(flags: Record<string, string | true>) {
+  const handle = requireString(flags, 'conversation', 'forget-session')
+  await deleteSession(handle)
+  ok({ status: 'ok', forgot: handle })
+}
+
 // ── Help (JSON) ──────────────────────────────────────────────────────
 
 function cmdHelp(): never {
@@ -663,11 +855,20 @@ function cmdHelp(): never {
       { name: 'resume-connection', description: 'Resume a paused connection. --connection-id <id>' },
       { name: 'disconnect', description: 'Terminate a connection. --connection-id <id>' },
       { name: 'rotate-token', description: 'Rotate a connection\'s bearer. --connection-id <id>' },
-      { name: 'check-inbox', description: 'This agent\'s pending requests + new inbound messages' },
-      { name: 'respond', description: 'Reply on a connection. --connection-id <id> --content "<text>"' },
-      { name: 'read-conversation', description: 'Read history on a connection. --connection-id <id> [--since <seq>]' },
-      { name: 'recall', description: 'Read-before-talk: load your private directive + public profile + your memory of this friend. --connection-id <id>' },
-      { name: 'remember', description: 'Write-after-talk: persist friend-scoped memory. --connection-id <id> [--deltas \'[{"kind","content","disclosure?"}]\'] [--summary "<rolling summary>"]' },
+      { name: 'conversations', description: 'List EVERY conversation — ones others started with you AND ones you started — in one list' },
+      { name: 'read', description: 'Read a conversation (either direction). --conversation <handle> [--since <seq>]' },
+      { name: 'send', description: 'Send a message in a conversation (either direction). --conversation <handle> --message "<text>"' },
+      { name: 'check', description: 'New / unanswered messages across ALL conversations, both directions' },
+      { name: 'requests', description: 'List pending incoming connect requests' },
+      { name: 'approve', description: 'Approve a pending incoming request. --request-id <id>' },
+      { name: 'reject', description: 'Reject a pending incoming request. --request-id <id>' },
+      { name: 'inspect-invite', description: 'Read an invite/QR\'s public manifest before connecting. --invite <slug-or-url>' },
+      { name: 'connect', description: 'Reach out to a shared agent via invite/QR. --invite <slug-or-url> --intro "<text>" [--guest]. Logged in → registered friendship; logged out → asks login-or-guest' },
+      { name: 'check-approval', description: 'Poll a pending OUTBOUND connect. --invite <same> --request-id <id>' },
+      { name: 'list-sessions', description: 'List your active outbound conversations' },
+      { name: 'forget-session', description: 'Forget an outbound conversation locally. --conversation <handle>' },
+      { name: 'recall', description: 'Read-before-talk: your private directive + public profile + your memory of this friend. --conversation <handle>' },
+      { name: 'remember', description: 'Write-after-talk: persist friend-scoped memory. --conversation <handle> [--deltas \'[{"kind","content","disclosure?"}]\'] [--summary "<rolling summary>"]' },
       { name: 'get-directive', description: 'Read your private directive (owner-only; the rules/purpose driving how you reply)' },
       { name: 'set-directive', description: 'Set your private directive (owner-only). --content "<rules/purpose/standard>"' },
       { name: 'help', description: 'Print this JSON help' },
@@ -714,9 +915,21 @@ async function main() {
     case 'resume-connection': return cmdResumeConnection(flags)
     case 'disconnect':        return cmdDisconnect(flags)
     case 'rotate-token':      return cmdRotateToken(flags)
-    case 'check-inbox':       return cmdCheckInbox(flags)
-    case 'respond':           return cmdRespond(flags)
-    case 'read-conversation': return cmdReadConversation(flags)
+    // Unified conversations (both directions)
+    case 'conversations':     return cmdConversations(flags)
+    case 'read':              return cmdRead(flags)
+    case 'send':              return cmdSend(flags)
+    case 'check':             return cmdCheck(flags)
+    // Reach out (active connect)
+    case 'inspect-invite':    return cmdInspectInvite(flags)
+    case 'connect':           return cmdConnect(flags)
+    case 'check-approval':    return cmdCheckApproval(flags)
+    case 'list-sessions':     return cmdListSessions()
+    case 'forget-session':    return cmdForgetSession(flags)
+    // Incoming requests (passive)
+    case 'requests':          return cmdRequests(flags)
+    case 'approve':           return cmdAcceptPending(flags)
+    case 'reject':            return cmdRejectPending(flags)
     case 'recall':            return cmdRecall(flags)
     case 'remember':          return cmdRemember(flags)
     case 'get-directive':     return cmdGetDirective(flags)

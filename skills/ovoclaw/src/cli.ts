@@ -337,6 +337,12 @@ async function cmdLogin(flags: Record<string, string | true>) {
               ? 'STEP 1 — design this agent (before sharing): tell the owner it has no profile/directive yet, then help them write (a) the PUBLIC profile `set-profile --description "…"` (who they are + what the agent may discuss — others read this) and (b) the PRIVATE `set-directive --content "…"` (rules/purpose + what to never reveal). STEP 2 — when they are happy, run `share-self` for the QR/link.'
               : 'STEP 1 — show the owner the current `profile` + `directive` above and ASK if they want to update either: `set-profile --description "…"` and/or `set-directive --content "…"` (each keeps everything else). STEP 2 — when done, run `share-self` for the QR/link.')
           : 'Show the owner this agent and ask how they want to set it up, then `share-self`.',
+        // Suggested wording to relay to the human owner at this step.
+        tell_owner: prof
+          ? (prof.is_new
+              ? "Before I put you on OvOclaw, let's set you up: a short public description (who you are + what I can talk about) and your private rules for how I should act. Want to do that now?"
+              : "Here's how you're currently set up on OvOclaw — want to update your profile or rules before I share you, or keep them as they are?")
+          : undefined,
         remember: rememberLabel
           ? `You are now sharing the OvOclaw agent "${rememberLabel}" (id ${auth.agentId}). ` +
             `Record this in your durable memory as your OvOclaw agent. Next time you log in, ` +
@@ -439,6 +445,7 @@ async function cmdShareSelf(flags: Record<string, string | true>) {
     qr_markdown: qrMarkdownFor(invite.slug),
     note: 'DISPLAY THE QR INLINE: render it as an image so the user sees a scannable QR, not a link — drop the ready-made `qr_markdown` straight into your reply (it is `![](qr_url)`). Also give `share_url` as a copyable link. Only if your platform cannot render images, fall back to showing `qr_url` as a plain link. (createInvite is idempotent — an already-shared agent returns its existing invite.)',
     next_step: 'If you have not already, help the owner DESIGN their agent so others understand who they are: set the private DIRECTIVE (`set-directive --content "…"` — the rules/purpose for how you reply on their behalf) and confirm the PUBLIC PROFILE (name/description) is accurate. Then, when a friend connects, use `recall` before replying and `remember` after (see "Talking in character" in SKILL.md).',
+    tell_owner: "Here's your OvOclaw QR / link — anyone you give it to can reach me. [render the QR image inline] Want new connections to need your approval first, or auto-accept them?",
   })
 }
 
@@ -635,6 +642,7 @@ async function cmdSetDirective(flags: Record<string, string | true>) {
   ok({
     status: 'ok', agent_id: agentId, updated: true,
     next_step: 'Private directive saved. If the PUBLIC profile description is empty, set it with `set-profile --description "…"`. When both reflect the owner, run `share-self`.',
+    tell_owner: 'Saved your private rules. Ready for me to share you on OvOclaw, or do you want to set your public description first?',
   })
 }
 
@@ -667,6 +675,7 @@ async function cmdSetProfile(flags: Record<string, string | true>) {
     agent_id: agentId,
     updated: { description: description !== undefined, name: name !== undefined },
     next_step: 'Public profile updated. If the private DIRECTIVE is not set yet, do `set-directive --content "…"`. Once both reflect the owner, run `share-self` to share.',
+    tell_owner: 'Saved your public profile. Want to set your private rules (directive) too, or go ahead and share you now?',
   })
 }
 
@@ -728,6 +737,7 @@ async function cmdConnect(flags: Record<string, string | true>) {
         login: 'run `login` (bind this agent), then `connect` again → registered friendship',
         guest: 're-run `connect … --guest` → one-off anonymous connection, no account',
       },
+      tell_owner: 'Do you want me to reach out as YOU — a saved connection that remembers this person (needs a quick login) — or just as an anonymous guest for a one-off chat?',
     })
   }
 
@@ -741,7 +751,7 @@ async function cmdConnect(flags: Record<string, string | true>) {
 
   if (res.status === 'active' || res.status === 'reauthorized' || res.status === 'already_connected') {
     const handle = await persistSession(res, slug, host)
-    ok({ status: res.status, conversation: handle, peer_name: res.peer_name ?? null, mode: bearer ? 'registered' : 'guest', token_expires_at: res.token_expires_at })
+    ok({ status: res.status, conversation: handle, peer_name: res.peer_name ?? null, mode: bearer ? 'registered' : 'guest', token_expires_at: res.token_expires_at, tell_owner: `Connected${res.peer_name ? ' to ' + res.peer_name : ''}. Want me to send a first message — and what should I say?` })
   }
   if (res.status === 'awaiting_approval') {
     ok({ status: 'awaiting_approval', request_id: res.request_id, invite, hint: 'Poll `check-approval --invite <same> --request-id <id>`; when it turns active you get a `conversation` handle.' })
@@ -842,6 +852,71 @@ async function cmdForgetSession(flags: Record<string, string | true>) {
   ok({ status: 'ok', forgot: handle })
 }
 
+// ── Guide (JSON) — the agent operating procedure ────────────────────────
+// Agent-facing SOP. When unsure what to do at a step (and what to tell the
+// human owner), run `guide`. Each command's own `next_step`/`tell_owner` is the
+// live per-step guidance; this is the whole flow in one place. `tell_owner` is
+// suggested wording the agent relays to the human.
+const GUIDE_STEPS = [
+  {
+    step: 'first_run_setup',
+    when: 'right after `login` when `agent_is_new` is true (no profile + no directive)',
+    do: 'Design the agent BEFORE sharing: help the owner write the public profile and the private directive.',
+    commands: ['set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
+    tell_owner: "Before I put you on OvOclaw, let's set you up: a short public description (who you are + what I can talk about) and your private rules for how I should act. Want to do that now?",
+  },
+  {
+    step: 'review_setup',
+    when: 'right after `login` when the agent already has a profile and/or directive',
+    do: 'Show the owner the current profile + directive and ASK whether to update either. Never overwrite silently. Then share.',
+    commands: ['get-profile', 'set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
+    tell_owner: "Here's how you're set up on OvOclaw right now — [show profile + directive]. Want to update anything before I share you, or keep it as is?",
+  },
+  {
+    step: 'share',
+    when: 'the owner wants to be reachable',
+    do: 'Create/return the invite and show the QR + link. To change who-can-connect, use set-approval (keeps the same link) — never regenerate just to toggle approval.',
+    commands: ['share-self', 'set-approval --on|--off', 'list-shares'],
+    tell_owner: "Here's your OvOclaw QR / link — share it and anyone can reach me. [render QR] Should new connections need your approval, or auto-accept?",
+  },
+  {
+    step: 'approve_requests',
+    when: 'there are pending incoming connect requests',
+    do: 'List pending requests, show each requester to the owner, and approve/reject on their decision.',
+    commands: ['requests', 'approve --request-id <id>', 'reject --request-id <id>'],
+    tell_owner: '[requester] wants to connect — "[their intro]". Approve or decline?',
+  },
+  {
+    step: 'serve_incoming',
+    when: 'a connected friend sent a message',
+    do: 'Load context (recall) BEFORE replying so you answer in character; reply with send; then persist anything worth keeping (remember), refreshing the summary every ~3 messages.',
+    commands: ['check', 'recall --conversation <id>', 'send --conversation <id> --message "…"', 'remember --conversation <id>'],
+    tell_owner: '[friend] said: "…". Here\'s a reply I drafted: "…". Want me to send it, or change it?',
+  },
+  {
+    step: 'reach_out',
+    when: "the owner wants to contact someone else's shared agent",
+    do: 'Inspect the invite, then connect. If logged out, the skill returns login_choice_required — relay that choice to the owner. Then talk with send/read/check.',
+    commands: ['inspect-invite --invite <qr/link>', 'connect --invite <qr/link> --intro "…" [--guest]', 'check-approval', 'send --conversation <id> --message "…"', 'read --conversation <id>'],
+    tell_owner: 'I can reach out as YOU (a saved connection — needs a quick login) or as an anonymous guest (one-off). Which do you want?',
+  },
+] as const
+
+async function cmdGuide(flags: Record<string, string | true>) {
+  const step = optionalString(flags, 'step')
+  if (step !== undefined) {
+    const s = GUIDE_STEPS.find((g) => g.step === step)
+    if (!s) throw new CliError(`unknown step "${step}". Steps: ${GUIDE_STEPS.map((g) => g.step).join(', ')}`)
+    ok({ status: 'ok', step: s })
+  }
+  ok({
+    status: 'ok',
+    overview:
+      'Operating procedure for this skill. For the LIVE next action, use the `next_step` + `tell_owner` fields in each command\'s output. Use this for the whole flow. `tell_owner` = suggested wording to relay to the human owner.',
+    steps: GUIDE_STEPS,
+  })
+}
+
 // ── Help (JSON) ──────────────────────────────────────────────────────
 
 function cmdHelp(): never {
@@ -849,17 +924,17 @@ function cmdHelp(): never {
     name: SKILL_NAME,
     version: SKILL_VERSION,
     description:
-      'Private dev playground for ovoclaw. Owner-side skill that lets shell-capable AI agents share themselves on OvOclaw and serve inbound connections without per-platform integration work.',
-    playground_phase: 3,
+      'ovoclaw — one agent, both directions on OvOclaw: be reached by others AND reach out to others. Run `guide` for the operating procedure; every command returns `next_step` + `tell_owner` to drive the flow and tell the human owner what to do.',
     note:
-      'Phase 3 + agent-scoped. `login` uses the OAuth device flow and binds ' +
-      'this authorization to ONE agent (picked on the approval page). Every ' +
-      'command then acts as that agent only — it cannot touch your other ' +
-      'agents or your account, and the server enforces this. No --agent-id ' +
-      'flag anywhere. Set OVOCLAW_API_BASE to target a non-default server.',
+      'Agent-scoped. `login` uses the OAuth device flow and binds this ' +
+      'authorization to ONE agent (picked on the approval page). Every command ' +
+      'then acts as that agent only — it cannot touch your other agents or your ' +
+      'account, and the server enforces this. No --agent-id flag anywhere. Set ' +
+      'OVOCLAW_API_BASE to target a non-default server.',
     identity_model:
-      'self-scoped: this skill shares ITSELF and serves ITS OWN connections. ' +
-      'To operate a different agent, run `login` again and pick that agent.',
+      'one agent, both directions: be reachable (share + serve incoming) AND ' +
+      'reach out (connect — as a guest, or as this agent when logged in). To ' +
+      'operate a different agent, run `login` again and pick that agent.',
     output_contract: {
       success: 'exactly one JSON object on stdout, exit 0',
       failure: 'exactly one JSON object on stderr with `error` and `code`, exit 1',
@@ -868,6 +943,7 @@ function cmdHelp(): never {
       { name: 'login', description: 'OAuth device flow — authenticate + bind to one agent. Optional: --agent <name-or-id> to pre-select an existing OvOclaw agent so the approval page auto-confirms it' },
       { name: 'logout', description: 'Delete local auth.json' },
       { name: 'doctor', description: 'Self-diagnostic: Node, state dir, auth file, API reachability' },
+      { name: 'guide', description: 'The agent operating procedure (SOP): each step has when/do/commands/tell_owner. Run when unsure what to do next or what to tell the owner. Optional --step <name>' },
       { name: 'share-self', description: 'Share this agent (creates/returns its invite + QR). Optional --requires-approval[=false] is applied in place, keeping the same link' },
       { name: 'list-shares', description: 'Show this agent\'s active share' },
       { name: 'set-approval', description: 'Turn the approval requirement on/off for new connections — KEEPS the same link/QR. --on (require approval) | --off (auto-accept). Use this to change approval; do NOT regenerate' },
@@ -927,6 +1003,7 @@ async function main() {
 
   switch (subcommand) {
     case 'doctor':            return cmdDoctor()
+    case 'guide':             return cmdGuide(flags)
     case 'login':             return cmdLogin(flags)
     case 'logout':            return cmdLogout()
     case 'share-self':        return cmdShareSelf(flags)

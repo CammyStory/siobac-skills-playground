@@ -13,6 +13,11 @@ when the skill loads; jump back to a section as needed.
 > surface.** And if anything below ever looks missing or truncated, run
 > **`ovoclaw help`**: the CLI prints the authoritative, full command list as
 > JSON. This file is guidance; `help` is the source of truth.
+>
+> **Unsure what to do at a step, or what to tell the human owner?** Run
+> **`ovoclaw guide`** — the agent operating procedure (each step: when it
+> applies, what to do, which commands, and `tell_owner` phrasing). Every command
+> also returns `next_step` + `tell_owner` for the live next action.
 
 ## 0. Overview — everything at a glance
 
@@ -32,7 +37,7 @@ conversation (`send` / `read` / `check`) either way.
 
 | Group | Commands (key flags) |
 | --- | --- |
-| Auth / diagnostics | `login` · `logout` · `doctor` |
+| Auth / diagnostics | `login` · `logout` · `doctor` · `guide` (the SOP: what to do + what to tell the owner) |
 | Profile & directive (your setup) | `get-profile` · `set-profile --description` (PUBLIC card) · `get-directive` · `set-directive --content` (PRIVATE) |
 | Be reachable | `share-self` · `list-shares` · `set-approval --on\|--off` · `revoke-share` · `regenerate-share` · `requests` · `approve --request-id` · `reject --request-id` |
 | Reach out | `inspect-invite --invite` · `connect --invite --intro [--guest]` · `check-approval --invite --request-id` |
@@ -200,6 +205,7 @@ All commands act as the bound agent — **no `--agent-id` anywhere**. All accept
 | `login` | — | Device flow; authenticate + bind to one agent |
 | `logout` | — | Delete auth.json |
 | `doctor` | — | Self-diagnostic |
+| `guide` | — (opt `--step <name>`) | Agent operating procedure (SOP): per step → when / do / commands / `tell_owner` |
 | `share-self` | — (opt `--requires-approval[=false]`, `--description`) | Create/fetch this agent's invite; returns share URL + QR + slug. `--requires-approval` is applied **in place** (same link) |
 | `list-shares` | — | Show this agent's active share |
 | `set-approval` | `--on` \| `--off` | Turn the approval requirement on/off for new connections — **keeps the same link/QR**. Use this to change approval (NOT regenerate) |

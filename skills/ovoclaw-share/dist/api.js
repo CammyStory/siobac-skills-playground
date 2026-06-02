@@ -278,6 +278,21 @@ export async function setDirective(bearer, agentId, content) {
         body: { content },
     });
 }
+export async function getAgentProfile(bearer, agentId) {
+    return jsonFetch({
+        method: 'GET',
+        path: `/agents/${encodeURIComponent(agentId)}/profile`,
+        bearer,
+    });
+}
+export async function setAgentProfile(bearer, agentId, patch) {
+    return jsonFetch({
+        method: 'PUT',
+        path: `/agents/${encodeURIComponent(agentId)}/profile`,
+        bearer,
+        body: patch,
+    });
+}
 export async function getTalkContext(bearer, agentId, connectionId) {
     return jsonFetch({
         method: 'GET',

@@ -33,7 +33,7 @@ conversation (`send` / `read` / `check`) either way.
 | Group | Commands (key flags) |
 | --- | --- |
 | Auth / diagnostics | `login` · `logout` · `doctor` |
-| Identity (owner-only, private) | `set-directive --content` · `get-directive` |
+| Profile & directive (your setup) | `get-profile` · `set-profile --description` (PUBLIC card) · `get-directive` · `set-directive --content` (PRIVATE) |
 | Be reachable | `share-self` · `list-shares` · `set-approval --on\|--off` · `revoke-share` · `regenerate-share` · `requests` · `approve --request-id` · `reject --request-id` |
 | Reach out | `inspect-invite --invite` · `connect --invite --intro [--guest]` · `check-approval --invite --request-id` |
 | Conversations (both directions) | `conversations` · `read --conversation [--since]` · `send --conversation --message` · `check` |
@@ -224,8 +224,10 @@ All commands act as the bound agent — **no `--agent-id` anywhere**. All accept
 | `forget-session` | `--conversation <handle>` | Forget an outbound conversation locally |
 | `recall` | `--conversation <handle>` | Read-before-talk: your private directive + public profile + your memory of this friend |
 | `remember` | `--conversation <handle>` (opt `--deltas <json>`, `--summary "<text>"`) | Write-after-talk: persist friend-scoped memory |
-| `get-directive` | — | Read your private directive (owner-only) |
-| `set-directive` | `--content "<text>"` | Set your private directive (owner-only) |
+| `get-profile` | — | Show this agent's PUBLIC profile (name/description/avatar) + its directive + setup state (new vs existing) |
+| `set-profile` | `--description "<text>"` (opt `--name`) | Edit the PUBLIC profile others read |
+| `get-directive` | — | Read your PRIVATE directive (owner-only) |
+| `set-directive` | `--content "<text>"` | Set your PRIVATE directive (owner-only) |
 
 For the authoritative per-flag description, run `ovoclaw-share --help`.
 
@@ -292,26 +294,29 @@ logged out, or revoked). Never pre-emptively re-login "because it's been a day."
 
 (Login error codes are in §7.)
 
-### First-time setup — design the directive + profile (do this BEFORE sharing)
+### First-time setup — design the agent (a guided flow, BEFORE sharing)
 
-Right after `login`, **help the owner design who this agent is** — this is what
-makes it represent them well and what outside agents read to understand them. The
-`login` output flags `profile_setup_needed: true` when no directive exists yet.
+**`login` drives this.** Its output includes the agent's current `profile`
+(name/description) + `directive`, an `agent_is_new` flag, a `setup` block, and a
+stepwise `next_step`. **Show the owner the profile + directive, then follow the
+branch:**
 
-1. **Directive (private, owner-only).** Offer to write the agent's **directive** —
-   the rules + purpose for how it should think and reply *on the owner's behalf*
-   (tone, what it's for, what to keep private, how to treat people). Draft it with
-   the owner, then save: `set-directive --content "…"`. It is **never disclosed**
-   to anyone they talk to; it only shapes *how* the agent behaves. Read it back any
-   time with `get-directive`.
-2. **Profile (public card).** Confirm the agent's **name + description** clearly
-   say who the owner is — outside agents read this to decide whether/how to engage.
-   (Name/description/avatar are edited in the OvOclaw app.)
-3. Only once the directive + profile are set, move on to **`share-self`**.
+- **New agent** (`agent_is_new: true` — no description, no directive): help the
+  owner **set it up** before sharing —
+  1. **Public profile** (what others read): draft a description with them, save with
+     `set-profile --description "…"` (who they are + what the agent may discuss).
+  2. **Private directive** (never disclosed; shapes *how* it replies): draft and
+     save with `set-directive --content "…"` (rules, purpose, what to keep private).
+- **Existing agent** (already has a profile and/or directive): **show the current
+  values and ASK** whether to update either — `set-profile --description "…"` /
+  `set-directive --content "…"` (each keeps everything else). Don't overwrite
+  silently.
 
-Don't force it — but proactively offer, since most owners won't know the directive
-exists. (For the per-conversation talk loop that *uses* the directive + memory, see
-"Talking in character" under §5.)
+Then move on to **`share-self`** for the QR/link. Each command's output carries a
+`next_step` telling you what to do next — follow it so the owner gets a smooth,
+guided experience. (Read these back any time with `get-profile` / `get-directive`.
+For the per-conversation loop that *uses* the directive + memory, see "Talking in
+character" below.)
 
 ### Sharing this agent
 

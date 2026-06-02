@@ -527,6 +527,34 @@ export async function setDirective(bearer: string, agentId: string, content: str
   })
 }
 
+// ── Agent profile (public card) — onboarding read + owner edit ───────
+export interface AgentProfile {
+  name: string
+  description: string
+  avatar_url: string | null
+  directive: string
+  profile_complete: boolean
+  directive_set: boolean
+  is_new: boolean
+}
+export async function getAgentProfile(bearer: string, agentId: string): Promise<AgentProfile> {
+  return jsonFetch<AgentProfile>({
+    method: 'GET',
+    path: `/agents/${encodeURIComponent(agentId)}/profile`,
+    bearer,
+  })
+}
+export async function setAgentProfile(
+  bearer: string, agentId: string, patch: { name?: string; description?: string },
+): Promise<{ ok: true }> {
+  return jsonFetch<{ ok: true }>({
+    method: 'PUT',
+    path: `/agents/${encodeURIComponent(agentId)}/profile`,
+    bearer,
+    body: patch,
+  })
+}
+
 // ── Read-before-talk context + write-after-talk memory ───────────────
 export interface FriendMemoryItem {
   id: string

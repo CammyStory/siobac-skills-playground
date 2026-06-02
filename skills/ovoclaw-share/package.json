@@ -1,6 +1,6 @@
 {
   "name": "ovoclaw-share",
-  "version": "0.9.22",
+  "version": "0.9.23",
   "description": "OvOclaw skill — one agent, both directions: be reached by others and reach out to others (publish/QR, connect to others as guest or as your agent, then send/read/check messages).",
   "license": "MIT",
   "type": "module",

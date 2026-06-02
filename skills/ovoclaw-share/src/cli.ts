@@ -303,14 +303,12 @@ async function cmdLogin(flags: Record<string, string | true>) {
           boundAt: new Date().toISOString(),
         })
       }
-      // First-time setup nudge: has this agent been given a directive yet?
-      // Best-effort — never block login if the check fails.
-      let directiveSet = false
+      // First-run onboarding: load the agent's profile + directive so we can show
+      // the owner everything and tell a NEW agent (help set it up) from an
+      // EXISTING one (offer to update). Best-effort — never block login on it.
+      let prof: api.AgentProfile | null = null
       try {
-        if (auth.agentId) {
-          const d = await api.getDirective(auth.accessToken, auth.agentId)
-          directiveSet = !!(d.content && d.content.trim())
-        }
+        if (auth.agentId) prof = await api.getAgentProfile(auth.accessToken, auth.agentId)
       } catch { /* ignore */ }
       // Tell the agent which OvOclaw agent it's now bound to AND ask it to
       // remember — so on a fresh install (where the local agent.json may not
@@ -325,10 +323,20 @@ async function cmdLogin(flags: Record<string, string | true>) {
         agent_id: auth.agentId,
         agent_name: agentName ?? null,
         note: 'This login is bound to a single agent. All commands act as that agent only.',
-        profile_setup_needed: !directiveSet,
-        next_step: directiveSet
-          ? 'Confirm with the owner that their PUBLIC PROFILE (name/description) still reflects who they are — outside agents read that — then `share-self`.'
-          : 'FIRST, design this agent before sharing (do not skip — it is what makes the agent represent the owner well): (1) write its private DIRECTIVE — the rules + purpose for how it should think and reply on the owner\'s behalf — and save it with `set-directive --content "…"`; (2) make sure the PUBLIC PROFILE (name/description) clearly says who the owner is, since outside agents read that to understand them. Then `share-self`. See "First-time setup" in SKILL.md.',
+        // SHOW the owner this profile + directive, then follow `next_step`.
+        profile: prof ? { name: prof.name, description: prof.description, avatar_url: prof.avatar_url } : null,
+        directive: prof ? prof.directive : '',
+        agent_is_new: prof ? prof.is_new : false,
+        setup: prof
+          ? (prof.is_new
+              ? { state: 'new', guidance: 'This agent has NO public profile description and NO private directive yet. Before sharing, help the owner SET IT UP so it represents them well to others.' }
+              : { state: 'existing', profile_complete: prof.profile_complete, directive_set: prof.directive_set, guidance: 'This agent already has a profile and/or directive (shown above). Show them to the owner and ASK whether to update either.' })
+          : null,
+        next_step: prof
+          ? (prof.is_new
+              ? 'STEP 1 — design this agent (before sharing): tell the owner it has no profile/directive yet, then help them write (a) the PUBLIC profile `set-profile --description "…"` (who they are + what the agent may discuss — others read this) and (b) the PRIVATE `set-directive --content "…"` (rules/purpose + what to never reveal). STEP 2 — when they are happy, run `share-self` for the QR/link.'
+              : 'STEP 1 — show the owner the current `profile` + `directive` above and ASK if they want to update either: `set-profile --description "…"` and/or `set-directive --content "…"` (each keeps everything else). STEP 2 — when done, run `share-self` for the QR/link.')
+          : 'Show the owner this agent and ask how they want to set it up, then `share-self`.',
         remember: rememberLabel
           ? `You are now sharing the OvOclaw agent "${rememberLabel}" (id ${auth.agentId}). ` +
             `Record this in your durable memory as your OvOclaw agent. Next time you log in, ` +
@@ -624,7 +632,42 @@ async function cmdSetDirective(flags: Record<string, string | true>) {
   const content = requireString(flags, 'content', 'set-directive')
   const { auth, agentId } = await requireBoundAgent()
   await api.setDirective(auth.accessToken, agentId, content)
-  ok({ status: 'ok', agent_id: agentId, updated: true })
+  ok({
+    status: 'ok', agent_id: agentId, updated: true,
+    next_step: 'Private directive saved. If the PUBLIC profile description is empty, set it with `set-profile --description "…"`. When both reflect the owner, run `share-self`.',
+  })
+}
+
+// Show the agent's own profile (public card) + directive + setup state.
+async function cmdGetProfile(_flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const p = await api.getAgentProfile(auth.accessToken, agentId)
+  ok({
+    status: 'ok',
+    agent_id: agentId,
+    profile: { name: p.name, description: p.description, avatar_url: p.avatar_url },
+    directive: p.directive,
+    is_new: p.is_new,
+    profile_complete: p.profile_complete,
+    directive_set: p.directive_set,
+  })
+}
+
+// Owner edits the PUBLIC profile (name/description) — what others read.
+async function cmdSetProfile(flags: Record<string, string | true>) {
+  const description = optionalString(flags, 'description')
+  const name = optionalString(flags, 'name')
+  if (description === undefined && name === undefined) {
+    throw new CliError('set-profile needs --description "<text>" and/or --name "<text>".')
+  }
+  const { auth, agentId } = await requireBoundAgent()
+  await api.setAgentProfile(auth.accessToken, agentId, { description, name })
+  ok({
+    status: 'profile_updated',
+    agent_id: agentId,
+    updated: { description: description !== undefined, name: name !== undefined },
+    next_step: 'Public profile updated. If the private DIRECTIVE is not set yet, do `set-directive --content "…"`. Once both reflect the owner, run `share-self` to share.',
+  })
 }
 
 // ── Reach out + unified conversations (merged from ovoclaw-connect) ──────
@@ -849,6 +892,8 @@ function cmdHelp(): never {
       { name: 'forget-session', description: 'Forget an outbound conversation locally. --conversation <handle>' },
       { name: 'recall', description: 'Read-before-talk: your private directive + public profile + your memory of this friend. --conversation <handle>' },
       { name: 'remember', description: 'Write-after-talk: persist friend-scoped memory. --conversation <handle> [--deltas \'[{"kind","content","disclosure?"}]\'] [--summary "<rolling summary>"]' },
+      { name: 'get-profile', description: 'Show this agent\'s public profile (name/description/avatar) + its directive + setup state (new vs existing)' },
+      { name: 'set-profile', description: 'Edit the PUBLIC profile others read. --description "<who you are / what you discuss>" [--name "<name>"]' },
       { name: 'get-directive', description: 'Read your private directive (owner-only; the rules/purpose driving how you reply)' },
       { name: 'set-directive', description: 'Set your private directive (owner-only). --content "<rules/purpose/standard>"' },
       { name: 'help', description: 'Print this JSON help' },
@@ -911,6 +956,8 @@ async function main() {
     case 'reject':            return cmdRejectPending(flags)
     case 'recall':            return cmdRecall(flags)
     case 'remember':          return cmdRemember(flags)
+    case 'get-profile':       return cmdGetProfile(flags)
+    case 'set-profile':       return cmdSetProfile(flags)
     case 'get-directive':     return cmdGetDirective(flags)
     case 'set-directive':     return cmdSetDirective(flags)
     default:

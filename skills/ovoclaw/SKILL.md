@@ -58,10 +58,17 @@ language.
 
 **Defaults:** API base `https://ovo.ovoclaw.com/dev` (override `OVOCLAW_API_BASE`;
 prod is `https://api.ovoclaw.com`). State (token, sessions) in `~/.ovoclaw/`.
-**Multi-agent platforms:** set **`OVOCLAW_AGENT_KEY`** to a stable per-agent id so
-each platform agent gets its OWN login — otherwise all agents on one machine share
-`~/.ovoclaw/auth.json` and act as the SAME OvOclaw agent. (`doctor` shows the
-active `agent_key` + `state_dir`.)
+**Multi-agent platforms — automatic per-agent isolation.** When `login` (or
+`connect`) runs in a working directory with no binding yet, it drops a small
+**`.ovoclaw.json`** there holding a non-secret `agent_key`; that key selects this
+agent's private folder `~/.ovoclaw/agents/<key>/` where its login lives. Because
+every agent platform runs its agents in their OWN working directories, each agent
+self-binds a separate folder — so a second agent logging into a different account
+can **never overwrite the first agent's login**. No setup needed. (Override the
+key explicitly with **`OVOCLAW_AGENT_KEY`** if you want; with neither, a single
+agent just uses the shared `~/.ovoclaw/` default.) `doctor` and `login` report the
+active `agent_binding` (key · source · folder) — on a multi-agent platform each
+agent MUST show a **distinct** key/folder.
 
 Everything below (§1–§8) just expands these — but the table above is the whole
 surface. Login is needed to be reachable and to reach out *as your agent*; guest
@@ -117,7 +124,10 @@ vs passive only differs in how the conversation *starts*.
 **Guest vs login (reach-out):** if the user asks to connect and they're not logged
 in, `connect` returns `login_choice_required` — ask whether to **log in** (connect
 as this agent → a saved friendship) or go **guest** (one-off, anonymous), then
-re-run. Logged in, `connect` just uses the agent.
+re-run. Logged in, `connect` just uses the agent. **No OvOclaw account yet?** That's
+still the login path — `login` opens a page where the owner can sign IN *or* sign
+UP (a new account creates an agent automatically). Never tell the owner to register
+somewhere else first; just run `login`.
 
 **Do NOT use it for** running the OvOclaw protocol server itself (this is a client
 of OvOclaw, not OvOclaw).
@@ -250,7 +260,10 @@ For the authoritative per-flag description, run `ovoclaw --help`.
 Owner actions need a one-time authorization. `login` uses the OAuth 2.0 Device
 Authorization Grant: the user approves in a browser while the skill polls. **The
 token is bound to the one agent the user picks** — every later command acts only
-as that agent.
+as that agent. The approval page handles **both sign-IN and sign-UP**: an owner
+with no OvOclaw account can create one right there (it also creates their first
+agent), so a brand-new owner needs nothing beyond `login` — don't send them off to
+register elsewhere. (Sign-up may require an invite code, depending on server config.)
 
 **Before `login`: pre-select the agent**, in this order:
 1. **Recall from your memory.** Every successful `login` told you the agent you

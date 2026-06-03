@@ -9,9 +9,9 @@ import {
 } from './argparse.js'
 import * as api from './api.js'
 import {
-  STATE_DIR,
-  AGENT_KEY,
-  AUTH_FILE,
+  stateDir,
+  authFilePath,
+  ensureAgentBinding,
   loadAuth,
   saveAuth,
   clearAuth,
@@ -25,6 +25,7 @@ import {
   updateSession,
   newSessionHandle,
   migrateLegacyState,
+  type AgentBinding,
   type AuthState,
 } from './state.js'
 import { parseInvite } from './invite.js'
@@ -134,6 +135,7 @@ interface DoctorCheck {
   value?: unknown
   reason?: string
   warning?: string
+  note?: string
 }
 
 async function cmdDoctor() {
@@ -151,24 +153,34 @@ async function cmdDoctor() {
     ? { ok: true }
     : { ok: false, reason: 'global fetch unavailable; Node 18+ required' }
 
-  // State directory + auth file. agent_key shows whether this install is
-  // namespaced per platform-agent (set OVOCLAW_AGENT_KEY) or sharing the
-  // default dir — important on platforms that run more than one agent.
-  checks.agent_key = AGENT_KEY
-    ? { ok: true, value: AGENT_KEY }
-    : { ok: true, value: null, warning: 'OVOCLAW_AGENT_KEY not set — this install uses the SHARED default state dir. If this platform runs more than one agent, set OVOCLAW_AGENT_KEY per agent so their logins do not collide.' }
+  // Per-agent binding + state directory + auth file. The binding shows WHICH
+  // agent folder this working directory maps to — the key thing on a platform
+  // that runs more than one agent (each must resolve to its OWN folder).
+  const binding = await ensureAgentBinding(false)
+  const sourceNote: Record<AgentBinding['source'], string> = {
+    'env': 'OVOCLAW_AGENT_KEY env var (explicit).',
+    'local-file': `local binding file ${binding.binding_file}.`,
+    'default-shared': 'no binding — using the SHARED default folder. Fine for a single agent; if this platform runs more than one agent, run `login` here so each gets its own .ovoclaw.json (or set OVOCLAW_AGENT_KEY).',
+  }
+  checks.agent_binding = {
+    ok: true,
+    value: { key: binding.key || null, source: binding.source, binding_file: binding.binding_file },
+    warning: binding.source === 'default-shared' ? sourceNote['default-shared'] : undefined,
+    note: sourceNote[binding.source],
+  }
+  const authFile = authFilePath()
   const writeCheck = await isAuthFileWriteable()
   checks.state_dir = writeCheck.ok
-    ? { ok: true, value: STATE_DIR }
-    : { ok: false, value: STATE_DIR, reason: writeCheck.reason ?? 'unknown' }
+    ? { ok: true, value: stateDir() }
+    : { ok: false, value: stateDir(), reason: writeCheck.reason ?? 'unknown' }
 
   try {
-    const st = await fs.stat(AUTH_FILE)
+    const st = await fs.stat(authFile)
     const modeOctal = (st.mode & 0o777).toString(8).padStart(3, '0')
     const tooPermissive = (st.mode & 0o077) !== 0
     checks.auth_file = {
       ok: !tooPermissive,
-      value: { path: AUTH_FILE, mode: modeOctal, exists: true },
+      value: { path: authFile, mode: modeOctal, exists: true },
       warning: tooPermissive
         ? `auth.json mode ${modeOctal} is group/world readable; expected 600.`
         : undefined,
@@ -177,11 +189,11 @@ async function cmdDoctor() {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       checks.auth_file = {
         ok: true,
-        value: { path: AUTH_FILE, exists: false },
+        value: { path: authFile, exists: false },
         warning: 'not logged in yet — run `login` to authenticate',
       }
     } else {
-      checks.auth_file = { ok: false, value: AUTH_FILE, reason: (e as Error).message }
+      checks.auth_file = { ok: false, value: authFile, reason: (e as Error).message }
     }
   }
 
@@ -273,7 +285,7 @@ async function cmdLogin(flags: Record<string, string | true>) {
         expires_in_seconds: codeResp.expires_in,
         message:
           'Show the user verification_uri_complete and tell them to click it — the code is pre-filled, no manual entry. ' +
-          '(Fallback: open verification_uri and enter user_code.) Then they sign in, pick which agent to share, and approve. ' +
+          '(Fallback: open verification_uri and enter user_code.) On that page they sign IN — or, if they have no OvOclaw account yet, SIGN UP right there (a new account creates an agent automatically) — then pick which agent to share and approve. ' +
           'The CLI keeps polling and continues automatically once approved.',
       },
       null,
@@ -322,6 +334,9 @@ async function cmdLogin(flags: Record<string, string | true>) {
       // survive) it can recall this from its own memory and pass it as
       // `--agent` next login, re-binding the same identity without a picker.
       const rememberLabel = agentName ?? auth.agentId
+      // Which isolated folder this login lives in — so multi-agent platforms can
+      // confirm each agent got its OWN binding and isn't sharing one login.
+      const binding = await ensureAgentBinding(false)
       ok({
         status: 'authenticated',
         scope: auth.scope,
@@ -330,6 +345,9 @@ async function cmdLogin(flags: Record<string, string | true>) {
         agent_id: auth.agentId,
         agent_name: agentName ?? null,
         note: 'This login is bound to a single agent. All commands act as that agent only.',
+        // This agent's private state folder + how it was resolved. On a platform
+        // running multiple agents, each MUST show a distinct key/folder.
+        state_binding: { key: binding.key || null, source: binding.source, binding_file: binding.binding_file, state_dir: binding.state_dir },
         // SHOW the owner this profile + directive, then follow `next_step`.
         profile: prof ? { name: prof.name, description: prof.description, avatar_url: prof.avatar_url } : null,
         directive: prof ? prof.directive : '',
@@ -375,7 +393,7 @@ async function cmdLogin(flags: Record<string, string | true>) {
 
 async function cmdLogout() {
   await clearAuth()
-  ok({ ok: true, status: 'logged_out', auth_file_path: AUTH_FILE })
+  ok({ ok: true, status: 'logged_out', auth_file_path: authFilePath() })
 }
 
 // ── Owner-side commands (wired to apps/server in phase 3) ──
@@ -739,12 +757,12 @@ async function cmdConnect(flags: Record<string, string | true>) {
   if (!loggedIn && !guest && !existing) {
     ok({
       status: 'login_choice_required',
-      message: 'You are not logged in. Ask the owner: LOG IN so this agent reaches out as ITSELF (a saved, account-anchored friendship), OR connect once as an anonymous GUEST.',
+      message: 'You are not logged in. Ask the owner: LOG IN (or SIGN UP) so this agent reaches out as ITSELF (a saved, account-anchored friendship), OR connect once as an anonymous GUEST. No OvOclaw account yet is fine — `login` opens a page where the owner can sign IN or create a NEW account (and an agent) on the spot; do NOT tell them to sign up anywhere else.',
       options: {
-        login: 'run `login` (bind this agent), then `connect` again → registered friendship',
+        login: 'run `login` — on that page the owner logs in OR signs up (a new account creates an agent automatically); then `connect` again → registered friendship. (Sign-up may ask for an invite code.)',
         guest: 're-run `connect … --guest` → one-off anonymous connection, no account',
       },
-      tell_owner: 'Do you want me to reach out as YOU — a saved connection that remembers this person (needs a quick login) — or just as an anonymous guest for a one-off chat?',
+      tell_owner: "Do you want me to reach out as YOU — a saved connection that remembers this person? That just needs a quick OvOclaw login; no account yet is fine, you can sign up on the same page. Or I can connect as an anonymous guest for a one-off chat.",
     })
   }
 
@@ -1007,6 +1025,13 @@ async function main() {
   const subcommand = argv[0]
   const { flags } = parseArgs(argv.slice(1))
   delete flags.json // no-op flag, same convention as ovoclaw-connect
+
+  // Resolve (and PIN) this run's per-agent folder before any state I/O. login &
+  // connect CREATE a local .ovoclaw.json in the working dir when none exists, so
+  // each platform agent self-binds its own isolated folder; every other command
+  // just reads the existing binding (env var > local file > shared default).
+  // Pinning means a binding created here is honored for the rest of the run.
+  await ensureAgentBinding(subcommand === 'login' || subcommand === 'connect')
 
   // One-time carry-over of a pre-rename login (~/.ovoclaw-share → ~/.ovoclaw).
   await migrateLegacyState()

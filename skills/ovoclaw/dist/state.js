@@ -1,42 +1,134 @@
-import { promises as fs, constants as fsConstants } from 'node:fs';
+import { promises as fs, constants as fsConstants, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-// Owner-side state, under ~/.ovoclaw/ (named after the skill).
+import { join, dirname } from 'node:path';
+import { randomBytes } from 'node:crypto';
+// Owner-side state lives under ~/.ovoclaw/. On a platform that runs MULTIPLE
+// agents under one home, a single shared ~/.ovoclaw/auth.json would let one
+// agent's login OVERWRITE another's — silently re-binding it to the wrong
+// account (and then it never sees its own connect requests / messages).
 //
-// PER-AGENT NAMESPACING. On a platform that runs MULTIPLE agents under the same
-// home, they would all read the SAME ~/.ovoclaw/auth.json and therefore act as
-// the SAME OvOclaw agent — one agent's login would leak to the others. To keep
-// each platform agent's login bound to ITS OWN session, the platform sets
-// `OVOCLAW_AGENT_KEY` to a stable per-agent identifier; state then lives in
-// ~/.ovoclaw/agents/<key>/ (its own auth.json / agent.json / sessions.json).
-// Unset → the shared default dir (single-agent installs, unchanged). A platform
-// running more than one agent MUST set this per agent.
-export const AGENT_KEY = (process.env.OVOCLAW_AGENT_KEY ?? '').trim();
+// PER-AGENT ISOLATION via a LOCAL BINDING FILE. Every agent platform runs its
+// agents in their OWN working directory, so we scope state by a `.ovoclaw.json`
+// file in that working dir (found by walking cwd → up to $HOME). It holds only
+// a NON-SECRET pointer { agent_key } — never tokens — and selects the private
+// folder ~/.ovoclaw/agents/<agent_key>/ where auth/agent/sessions live. `login`
+// and `connect` auto-create the file on first use, so two agents in two working
+// dirs get two folders and can never touch each other's login. An explicit
+// OVOCLAW_AGENT_KEY env var overrides the file; with NEITHER, we fall back to
+// the shared ~/.ovoclaw default (single-agent installs, unchanged).
 export const STATE_BASE = join(homedir(), '.ovoclaw');
 // Where state lived before the skill was renamed ovoclaw-share → ovoclaw.
 // migrateLegacyState() copies an existing login over on first run so users
 // don't have to log in again after the rename.
 export const LEGACY_STATE_BASE = join(homedir(), '.ovoclaw-share');
-export const STATE_DIR = AGENT_KEY
-    ? join(STATE_BASE, 'agents', AGENT_KEY.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 64) || 'default')
-    : STATE_BASE;
-export const AUTH_FILE = join(STATE_DIR, 'auth.json');
+// The local per-working-directory pointer file (no secrets — just agent_key).
+export const BINDING_FILENAME = '.ovoclaw.json';
+function sanitizeKey(k) {
+    return k.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 64);
+}
+// Nearest .ovoclaw.json carrying a usable agent_key, walking cwd up to $HOME.
+function findBindingFile() {
+    const home = homedir();
+    let d = process.cwd();
+    for (let i = 0; i < 40; i++) {
+        const candidate = join(d, BINDING_FILENAME);
+        try {
+            const parsed = JSON.parse(readFileSync(candidate, 'utf8'));
+            const key = sanitizeKey(String(parsed?.agent_key ?? '').trim());
+            if (key)
+                return { path: candidate, key };
+        }
+        catch { /* missing or malformed — keep walking up */ }
+        if (d === home)
+            break;
+        const parent = dirname(d);
+        if (parent === d)
+            break;
+        d = parent;
+    }
+    return null;
+}
+// Once resolved (or created) within a process the key is PINNED, so every
+// command in the same run reads/writes the SAME folder — including the very run
+// of `login` that just created the binding file.
+let _pinnedKey = null;
+function resolveAgentKey() {
+    if (_pinnedKey !== null)
+        return _pinnedKey;
+    const env = (process.env.OVOCLAW_AGENT_KEY ?? '').trim();
+    if (env)
+        return sanitizeKey(env);
+    const bf = findBindingFile();
+    return bf ? bf.key : '';
+}
+function stateDirFor(key) {
+    return key ? join(STATE_BASE, 'agents', key) : STATE_BASE;
+}
+// State dir for the current run (env key > local binding file > shared default).
+export function stateDir() { return stateDirFor(resolveAgentKey()); }
+// Resolve the per-agent binding. When `create` is true and nothing is bound yet,
+// CREATE a fresh .ovoclaw.json in the current working directory so this agent
+// gets its OWN isolated folder. login/connect pass create=true; read-only
+// callers (doctor) pass false.
+export async function ensureAgentBinding(create) {
+    const env = (process.env.OVOCLAW_AGENT_KEY ?? '').trim();
+    if (env) {
+        const key = sanitizeKey(env);
+        _pinnedKey = key;
+        return { key, source: 'env', binding_file: null, state_dir: stateDirFor(key), created: false };
+    }
+    const found = findBindingFile();
+    if (found) {
+        _pinnedKey = found.key;
+        return { key: found.key, source: 'local-file', binding_file: found.path, state_dir: stateDirFor(found.key), created: false };
+    }
+    if (!create) {
+        _pinnedKey = '';
+        return { key: '', source: 'default-shared', binding_file: null, state_dir: STATE_BASE, created: false };
+    }
+    // No binding yet → mint one in the CURRENT working directory. The key is a
+    // readable cwd basename + a random suffix so it's both recognizable and unique.
+    const base = (sanitizeKey(process.cwd().split(/[\\/]/).filter(Boolean).pop() || 'agent') || 'agent').slice(0, 24);
+    const key = `${base}-${randomBytes(4).toString('hex')}`;
+    const path = join(process.cwd(), BINDING_FILENAME);
+    const body = {
+        agent_key: key,
+        created_at: new Date().toISOString(),
+        note: "OvOclaw per-agent binding. Points to the private ~/.ovoclaw/agents/<agent_key>/ folder that holds THIS agent's login — contains no secrets. Keep one per agent working directory; delete to unbind.",
+    };
+    try {
+        await fs.writeFile(path, JSON.stringify(body, null, 2), { mode: 0o600 });
+        try {
+            await fs.chmod(path, 0o600);
+        }
+        catch { }
+        _pinnedKey = key;
+        return { key, source: 'local-file', binding_file: path, state_dir: stateDirFor(key), created: true };
+    }
+    catch {
+        // cwd not writable — degrade to the shared default rather than fail outright.
+        _pinnedKey = '';
+        return { key: '', source: 'default-shared', binding_file: null, state_dir: STATE_BASE, created: false };
+    }
+}
+// Lazy per-run paths — each resolves the keyed dir fresh (honoring a pinned key)
+// so a binding created mid-run (by `login`) takes effect immediately.
+function dir() { return stateDir(); }
+function authFile() { return join(dir(), 'auth.json'); }
 // A mirror of auth.json written on every save. If auth.json is later lost or
 // corrupted (e.g. an interrupted write, or a clumsy skill update), loadAuth
-// transparently restores from this backup — so the user keeps their login
-// instead of having to run `login` again.
-export const AUTH_BACKUP_FILE = join(STATE_DIR, 'auth.json.bak');
+// transparently restores from this backup — so the user keeps their login.
+function authBackupFile() { return join(dir(), 'auth.json.bak'); }
 // Which agent this skill last shared. Kept SEPARATE from auth.json so it
 // survives logout / token expiry: on the next `login` we pass this id to the
-// approval page as agent_hint, and it auto-confirms the same agent — so every
-// re-share re-binds the same OvOclaw identity without the user re-choosing.
-export const AGENT_FILE = join(STATE_DIR, 'agent.json');
-const DIR = STATE_DIR;
-const FILE = AUTH_FILE;
+// approval page as agent_hint, and it auto-confirms the same agent.
+function agentFile() { return join(dir(), 'agent.json'); }
+// Exposed for diagnostics (doctor) + logout messaging.
+export function authFilePath() { return authFile(); }
 async function ensureDir() {
-    await fs.mkdir(DIR, { recursive: true, mode: 0o700 });
+    await fs.mkdir(dir(), { recursive: true, mode: 0o700 });
     try {
-        await fs.chmod(DIR, 0o700);
+        await fs.chmod(dir(), 0o700);
     }
     catch { }
 }
@@ -90,12 +182,12 @@ async function readAuthFrom(path) {
     return null;
 }
 export async function loadAuth() {
-    const primary = await readAuthFrom(FILE);
+    const primary = await readAuthFrom(authFile());
     if (primary)
         return primary;
     // Primary missing or corrupt — recover from the backup and restore it so the
     // user stays logged in without re-running `login`.
-    const backup = await readAuthFrom(AUTH_BACKUP_FILE);
+    const backup = await readAuthFrom(authBackupFile());
     if (backup) {
         try {
             await saveAuth(backup);
@@ -109,17 +201,17 @@ export async function saveAuth(auth) {
     await ensureDir();
     const json = JSON.stringify(auth, null, 2);
     // Atomic so a refresh's rotated token always lands intact.
-    await writeFileAtomic(FILE, json);
+    await writeFileAtomic(authFile(), json);
     // Mirror to the backup so a lost/corrupt auth.json can self-heal on next load.
     try {
-        await writeFileAtomic(AUTH_BACKUP_FILE, json);
+        await writeFileAtomic(authBackupFile(), json);
     }
     catch { /* backup is best-effort; never fail a login over it */ }
 }
 export async function clearAuth() {
     // Remove BOTH files — otherwise loadAuth would restore the login from the
     // backup and logout wouldn't stick.
-    for (const f of [FILE, AUTH_BACKUP_FILE]) {
+    for (const f of [authFile(), authBackupFile()]) {
         try {
             await fs.unlink(f);
         }
@@ -131,7 +223,7 @@ export async function clearAuth() {
 }
 export async function loadBoundAgent() {
     try {
-        const raw = await fs.readFile(AGENT_FILE, 'utf8');
+        const raw = await fs.readFile(agentFile(), 'utf8');
         const parsed = JSON.parse(raw);
         if (typeof parsed === 'object' && parsed !== null && typeof parsed.agentId === 'string') {
             return parsed;
@@ -146,16 +238,17 @@ export async function loadBoundAgent() {
 }
 export async function saveBoundAgent(agent) {
     await ensureDir();
-    await fs.writeFile(AGENT_FILE, JSON.stringify(agent, null, 2), { mode: 0o600 });
+    const f = agentFile();
+    await fs.writeFile(f, JSON.stringify(agent, null, 2), { mode: 0o600 });
     try {
-        await fs.chmod(AGENT_FILE, 0o600);
+        await fs.chmod(f, 0o600);
     }
     catch { }
 }
 export async function isAuthFileWriteable() {
     try {
         await ensureDir();
-        await fs.access(DIR, fsConstants.W_OK);
+        await fs.access(dir(), fsConstants.W_OK);
         return { ok: true };
     }
     catch (e) {
@@ -166,13 +259,12 @@ export async function isAuthFileWriteable() {
 // Stored alongside auth.json in the SAME state dir (the merged skill keeps one
 // home). A session holds the per-connection bearer (xext_) for /message+/poll.
 // Ported from ovoclaw-connect when the skills merged.
-import { randomBytes } from 'node:crypto';
-export const SESSIONS_FILE = join(STATE_DIR, 'sessions.json');
+function sessionsFile() { return join(dir(), 'sessions.json'); }
 const SESSION_HANDLE_RE = /^s_[0-9a-f]{16}$/;
 function isValidHandle(h) { return SESSION_HANDLE_RE.test(h); }
 async function readSessions() {
     try {
-        const raw = await fs.readFile(SESSIONS_FILE, 'utf8');
+        const raw = await fs.readFile(sessionsFile(), 'utf8');
         const parsed = JSON.parse(raw);
         return typeof parsed === 'object' && parsed !== null ? parsed : {};
     }
@@ -183,14 +275,11 @@ async function readSessions() {
     }
 }
 async function writeSessions(data) {
-    await fs.mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
+    await ensureDir();
+    const f = sessionsFile();
+    await fs.writeFile(f, JSON.stringify(data, null, 2), { mode: 0o600 });
     try {
-        await fs.chmod(STATE_DIR, 0o700);
-    }
-    catch { }
-    await fs.writeFile(SESSIONS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
-    try {
-        await fs.chmod(SESSIONS_FILE, 0o600);
+        await fs.chmod(f, 0o600);
     }
     catch { }
 }
@@ -236,13 +325,14 @@ export function newSessionHandle() { return 's_' + randomBytes(8).toString('hex'
 // login (auth/agent/sessions) over so the user stays logged in. No-op once
 // migrated, for fresh users, or when there's nothing legacy to copy.
 export async function migrateLegacyState() {
+    const target = dir();
     try {
-        await fs.access(AUTH_FILE);
+        await fs.access(authFile());
         return;
     }
     catch { /* new dir has no auth — maybe migrate */ }
-    const legacyDir = STATE_DIR.replace(STATE_BASE, LEGACY_STATE_BASE);
-    if (legacyDir === STATE_DIR)
+    const legacyDir = target.replace(STATE_BASE, LEGACY_STATE_BASE);
+    if (legacyDir === target)
         return;
     try {
         await fs.access(join(legacyDir, 'auth.json'));
@@ -250,17 +340,17 @@ export async function migrateLegacyState() {
     catch {
         return;
     } // nothing legacy
-    await fs.mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
+    await fs.mkdir(target, { recursive: true, mode: 0o700 });
     try {
-        await fs.chmod(STATE_DIR, 0o700);
+        await fs.chmod(target, 0o700);
     }
     catch { }
     for (const f of ['auth.json', 'auth.json.bak', 'agent.json', 'sessions.json']) {
         try {
             const buf = await fs.readFile(join(legacyDir, f));
-            await fs.writeFile(join(STATE_DIR, f), buf, { mode: 0o600 });
+            await fs.writeFile(join(target, f), buf, { mode: 0o600 });
             try {
-                await fs.chmod(join(STATE_DIR, f), 0o600);
+                await fs.chmod(join(target, f), 0o600);
             }
             catch { }
         }

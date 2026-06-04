@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { promises as fs, constants as fsConstants } from 'node:fs'
 import { platform, arch } from 'node:os'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import {
   parseArgs,
   requireString,
@@ -39,11 +41,35 @@ import { SKILL_NAME, SKILL_VERSION } from './version.js'
 // Same shape as ovoclaw-connect — agents already trained on that contract
 // can branch on `code` here without learning a new convention.
 
+// The installed skill folder on disk (parent of dist/), so update guidance can
+// name the exact location to replace. .../skills/ovoclaw/dist/cli.js → .../skills/ovoclaw
+function skillDir(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..')
+}
+
+// A concrete, copy-pasteable update instruction. The skill is a folder the
+// platform points at (git clone OR a copied/rsync'd dir), so we can't reliably
+// `git pull` in place — instead spell out: get the latest from the RIGHT repo,
+// then replace/re-point this exact folder. dist/ is prebuilt (no build step).
+function updateInstruction(repoUrl: string | null): string {
+  const repo = repoUrl || 'https://github.com/CammyStory/ovoclaw-skills-playground'
+  return [
+    `To update: pull the latest from ${repo} (the skill is its \`skills/ovoclaw/\` folder; \`dist/\` is prebuilt, no build step),`,
+    `then replace this installed copy at ${skillDir()} with that folder (or re-point this platform at it) and re-run.`,
+    `If you cloned the repo, \`git -C <your clone> pull\` then re-sync that folder here.`,
+  ].join(' ')
+}
+
+// Enrich a raw server update notice with the on-disk path + the how-to.
+function enrichNotice(upd: api.SkillUpdateNotice): api.SkillUpdateNotice {
+  return { ...upd, skill_path: skillDir(), how_to_update: updateInstruction(upd.update_url) }
+}
+
 // Attach a `skill_update` block when this run heard about a newer skill from
 // the server. SKILL.md tells the agent to relay it to the user.
 function withUpdateNotice<T extends object>(body: T): T & { skill_update?: api.SkillUpdateNotice } {
   const upd = api.getSkillUpdateNotice()
-  return upd ? { ...body, skill_update: upd } : body
+  return upd ? { ...body, skill_update: enrichNotice(upd) } : body
 }
 
 function ok(value: unknown): never {
@@ -230,10 +256,30 @@ async function cmdDoctor() {
     checks.api_reachable = { ok: false, reason: 'skipped — api_base invalid' }
   }
 
-  const allOk = Object.values(checks).every((c) => c.ok)
+  // Freshness: actively probe the server for the latest version (this is a fresh
+  // process, so nothing was captured yet). Report up-to-date vs stale + the exact
+  // way to update — so "am I current?" has one reliable answer here.
+  const vs = await api.getVersionStatus()
+  const skill_freshness = !vs.reachable
+    ? { up_to_date: null as boolean | null, your_version: vs.current, note: 'could not reach the server to check for updates (see api_reachable)' }
+    : vs.up_to_date
+      ? { up_to_date: true, your_version: vs.current, latest_version: vs.latest }
+      : {
+          up_to_date: false,
+          required: vs.required,
+          your_version: vs.current,
+          latest_version: vs.latest,
+          skill_path: skillDir(),
+          how_to_update: updateInstruction(vs.update_url),
+        }
+
+  // A stale skill isn't a hard doctor failure (commands still run), but a
+  // REQUIRED update is — surface it loudly.
+  const allOk = Object.values(checks).every((c) => c.ok) && !vs.required
   const report = {
     ok: allOk,
     skill: { name: SKILL_NAME, version: SKILL_VERSION },
+    skill_freshness,
     runtime: { node: process.versions.node, platform: platform(), arch: arch() },
     checks,
   }
@@ -836,6 +882,58 @@ async function cmdAutoStatus(flags: Record<string, string | true>) {
   ok({ status: 'ok', conversation: connectionId, auto: s, note })
 }
 
+// Per-agent auto-converse opt-in. No flag → show state; --on/--off → toggle.
+// When ON, every connection this agent is in auto-responds by default (zero
+// config), and if the other end is also on, the two agents converse on their own.
+async function cmdAutoConverse(flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const on = flags.on === true || flags.on === 'true'
+  const off = flags.off === true || flags.off === 'true'
+  if (on && off) throw new CliError('Pass either --on or --off, not both.')
+  if (!on && !off) {
+    const s = await api.getAutoConverse(auth.accessToken, agentId)
+    ok({
+      status: 'ok', agent_id: agentId, auto_converse: s.enabled,
+      note: s.enabled
+        ? 'Auto-converse is ON: I reply automatically on every connection (and can talk agent-to-agent). Watch with `check`; redirect with `auto-resume --purpose`. Turn off with `auto-converse --off`.'
+        : 'Auto-converse is OFF: connections are manual — you approve each reply. Turn on with `auto-converse --on`.',
+    })
+    return
+  }
+  const s = await api.setAutoConverse(auth.accessToken, agentId, on)
+  ok({
+    status: 'auto_converse_updated', agent_id: agentId, auto_converse: s.enabled,
+    note: s.enabled
+      ? 'Auto-converse is now ON. From now on, when someone is connected I reply automatically toward a natural conversation — you do NOT run `send` per message. I pause every few turns to check in, and you can steer or stop anytime.'
+      : 'Auto-converse is now OFF. Back to manual — I surface messages via `check` and you decide each reply.',
+    tell_owner: s.enabled
+      ? "I'll now reply automatically to people who connect (and chat with their agents) — I'll check in every few turns and you can jump in to steer or stop me anytime."
+      : "Auto-replies are off — I'll show you incoming messages and let you decide each reply.",
+  })
+}
+
+// Continue a checkpoint-paused auto-conversation (optionally steering it).
+async function cmdAutoResume(flags: Record<string, string | true>) {
+  const connectionId = requireString(flags, 'conversation', 'auto-resume')
+  const purpose = optionalString(flags, 'purpose')
+  const { auth, agentId } = await requireBoundAgent()
+  const s = await api.autoResume(auth.accessToken, agentId, connectionId, purpose)
+  if (s.status === 'none') {
+    ok({ status: 'nothing_paused', conversation: connectionId, note: 'This conversation is not paused at a checkpoint — nothing to resume.' })
+    return
+  }
+  ok({
+    status: 'resumed',
+    conversation: connectionId,
+    steered: purpose !== undefined && purpose !== '',
+    auto: { status: s.status, turn_count: s.turn_count },
+    note: purpose
+      ? `Resumed and steered toward: "${purpose}". I'll keep going and pause again in a few turns.`
+      : 'Resumed — I\'ll continue the conversation and pause again in a few turns to check in.',
+    tell_owner: purpose ? `Got it — steering the conversation toward ${purpose}.` : 'Picking the conversation back up.',
+  })
+}
+
 async function cmdGetDirective(_flags: Record<string, string | true>) {
   const { auth, agentId } = await requireBoundAgent()
   const result = await api.getDirective(auth.accessToken, agentId)
@@ -1055,6 +1153,18 @@ async function cmdCheck(_flags: Record<string, string | true>) {
           drafts.map(d => `[${d.connection_id}] "${d.draft}"`).join(' · ')
       }
     } catch { /* best-effort; never sink check */ }
+    // Auto-converse checkpoints (v2): conversations paused after a few auto turns,
+    // waiting for the owner to continue / steer / wrap up. Recurring until handled.
+    try {
+      const cps = await api.autoCheckpoints(auth.accessToken, auth.agentId)
+      if (cps.length) {
+        result.auto_checkpoints = cps
+        result.auto_checkpoints_note =
+          `${cps.length} auto-conversation${cps.length === 1 ? '' : 's'} paused at a checkpoint — ask the owner whether to keep going, steer, or wrap up. ` +
+          `Continue with \`auto-resume --conversation <id>\` (add \`--purpose "<new goal>"\` to steer, or \`auto-stop\` to end): ` +
+          cps.map(c => `[${c.connection_id}] after ${c.turn_count} turns${c.purpose ? ` (goal: ${c.purpose})` : ''}`).join(' · ')
+      }
+    } catch { /* best-effort; never sink check */ }
   } else {
     result.inbound = { note: 'not logged in — only outbound (guest) conversations checked' }
   }
@@ -1211,7 +1321,9 @@ function cmdHelp(): never {
       { name: 'forget-session', description: 'Forget an outbound conversation locally. --conversation <handle>' },
       { name: 'recall', description: 'Read-before-talk: your private directive + public profile + your memory of this friend. --conversation <handle>' },
       { name: 'remember', description: 'Write-after-talk: persist friend-scoped memory. --conversation <handle> [--deltas \'[{"kind","content","disclosure?"}]\'] [--summary "<rolling summary>"]' },
+      { name: 'auto-converse', description: 'Zero-config switch: turn auto-reply ON by default for this agent so it replies automatically on EVERY connection (and talks agent-to-agent when the other end is also on). No flag = show state; --on / --off. Watch with `check`, steer/continue with auto-resume, end with auto-stop' },
       { name: 'auto-start', description: 'Hand a conversation off to auto-reply: the agent composes + sends each reply on your behalf toward a goal. --conversation <inbound id> --purpose "<what to achieve>" [--max-turns N] [--draft]. With --draft (oversight mode) it DRAFTS each reply and waits for auto-approve instead of sending. Confirm with the owner first; stop anytime with auto-stop' },
+      { name: 'auto-resume', description: 'Continue an auto-conversation paused at a checkpoint (shown by `check`). --conversation <id> [--purpose "<new goal>"] — add --purpose to STEER it (or empty to clear). Use auto-stop to end instead' },
       { name: 'auto-approve', description: 'Draft (oversight) mode: send the reply the agent drafted, optionally edited first. --conversation <id> [--edit "<your version>"]. Pending drafts are listed by `check`' },
       { name: 'auto-stop', description: 'Stop auto-reply on a conversation and hand back to manual. --conversation <id>' },
       { name: 'auto-status', description: 'Auto-reply state for a conversation (running/done/interrupted/…, mode, turns sent, any pending draft, result). --conversation <id>' },
@@ -1290,8 +1402,10 @@ async function main() {
     case 'reject':            return cmdRejectPending(flags)
     case 'recall':            return cmdRecall(flags)
     case 'remember':          return cmdRemember(flags)
+    case 'auto-converse':     return cmdAutoConverse(flags)
     case 'auto-start':        return cmdAutoStart(flags)
     case 'auto-approve':      return cmdAutoApprove(flags)
+    case 'auto-resume':       return cmdAutoResume(flags)
     case 'auto-stop':         return cmdAutoStop(flags)
     case 'auto-status':       return cmdAutoStatus(flags)
     case 'get-profile':       return cmdGetProfile(flags)

@@ -63,6 +63,30 @@ export function getSkillUpdateNotice() {
             : 'A newer ovoclaw skill is available — tell the user they can update when convenient.',
     };
 }
+export async function getVersionStatus() {
+    let reachable = false;
+    try {
+        const res = await fetch(`${getApiBase()}/health`, {
+            method: 'GET',
+            headers: { 'X-Ovoclaw-Share-Version': SKILL_VERSION },
+        });
+        captureUpdateHeaders(res);
+        reachable = true;
+    }
+    catch {
+        /* offline — doctor's own api_reachable check reports the network error */
+    }
+    const behind = !!seenLatest && versionLt(SKILL_VERSION, seenLatest);
+    const required = !!seenMin && versionLt(SKILL_VERSION, seenMin);
+    return {
+        up_to_date: reachable && !behind && !required,
+        current: SKILL_VERSION,
+        latest: seenLatest,
+        required,
+        update_url: seenUrl,
+        reachable,
+    };
+}
 function classifyStatus(status, body, opts) {
     if (opts.oauthEndpoint && status === 404)
         return 'server_not_ready';
@@ -333,6 +357,33 @@ export async function autoDrafts(bearer, agentId) {
         bearer,
     });
     return r.drafts;
+}
+// ── Auto-converse v2: per-agent opt-in + checkpoints + resume ─────────────
+// When auto_converse is ON, every connection this agent is part of auto-responds
+// by default (no auto-start) — and if the other end's agent is also on, the two
+// agents converse on their own. The owner watches via `check` and steers via
+// auto-resume; a soft checkpoint pauses them every few turns.
+export async function getAutoConverse(bearer, agentId) {
+    return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/auto-converse`, bearer });
+}
+export async function setAutoConverse(bearer, agentId, enabled) {
+    return jsonFetch({ method: 'PUT', path: `/agents/${encodeURIComponent(agentId)}/auto-converse`, bearer, body: { enabled } });
+}
+export async function autoCheckpoints(bearer, agentId) {
+    const r = await jsonFetch({
+        method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/auto-checkpoints`, bearer,
+    });
+    return r.checkpoints;
+}
+// Continue a checkpoint-paused conversation. An optional purpose re-points
+// (steers) both sides' goal; '' clears it back to free chat.
+export async function autoResume(bearer, agentId, connectionId, purpose) {
+    return jsonFetch({
+        method: 'POST',
+        path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-resume`,
+        bearer,
+        ...(purpose !== undefined ? { body: { purpose } } : {}),
+    });
 }
 export async function autoStop(bearer, agentId, connectionId) {
     return jsonFetch({

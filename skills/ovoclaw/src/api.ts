@@ -70,6 +70,10 @@ export interface SkillUpdateNotice {
   required: boolean        // true when below the server's minimum supported version
   update_url: string | null
   message: string
+  // Enriched by the CLI before surfacing (see cli.ts): the exact on-disk skill
+  // folder and a concrete, copy-pasteable update instruction.
+  skill_path?: string
+  how_to_update?: string
 }
 
 let seenLatest: string | null = null
@@ -111,6 +115,43 @@ export function getSkillUpdateNotice(): SkillUpdateNotice | null {
     message: required
       ? 'This ovoclaw skill is older than the server\'s minimum supported version and may misbehave — update it before relying on it.'
       : 'A newer ovoclaw skill is available — tell the user they can update when convenient.',
+  }
+}
+
+// Definitive freshness verdict, ALWAYS returned (never null). Actively probes
+// the server — sends our version to /health and captures the reply headers —
+// so a fresh process (e.g. `doctor`, which ran no other command) still knows
+// whether it's current. Falls back to whatever was already seen this run if the
+// probe can't reach the server.
+export interface VersionStatus {
+  up_to_date: boolean
+  current: string
+  latest: string | null
+  required: boolean        // below the server's MINIMUM supported version
+  update_url: string | null
+  reachable: boolean       // false → couldn't reach the server to check
+}
+export async function getVersionStatus(): Promise<VersionStatus> {
+  let reachable = false
+  try {
+    const res = await fetch(`${getApiBase()}/health`, {
+      method: 'GET',
+      headers: { 'X-Ovoclaw-Share-Version': SKILL_VERSION },
+    })
+    captureUpdateHeaders(res)
+    reachable = true
+  } catch {
+    /* offline — doctor's own api_reachable check reports the network error */
+  }
+  const behind = !!seenLatest && versionLt(SKILL_VERSION, seenLatest)
+  const required = !!seenMin && versionLt(SKILL_VERSION, seenMin)
+  return {
+    up_to_date: reachable && !behind && !required,
+    current: SKILL_VERSION,
+    latest: seenLatest,
+    required,
+    update_url: seenUrl,
+    reachable,
   }
 }
 
@@ -617,7 +658,7 @@ export interface AutoSession {
   connection_id?: string
   agent_id?: string
   purpose?: string
-  status: 'running' | 'done' | 'interrupted' | 'stalled' | 'failed' | 'none' | 'no_draft'
+  status: 'running' | 'paused_checkpoint' | 'done' | 'interrupted' | 'stalled' | 'failed' | 'none' | 'no_draft'
   mode?: AutoMode
   turn_count?: number
   max_turns?: number
@@ -672,6 +713,43 @@ export async function autoDrafts(bearer: string, agentId: string): Promise<AutoD
     bearer,
   })
   return r.drafts
+}
+
+// ── Auto-converse v2: per-agent opt-in + checkpoints + resume ─────────────
+// When auto_converse is ON, every connection this agent is part of auto-responds
+// by default (no auto-start) — and if the other end's agent is also on, the two
+// agents converse on their own. The owner watches via `check` and steers via
+// auto-resume; a soft checkpoint pauses them every few turns.
+export async function getAutoConverse(bearer: string, agentId: string): Promise<{ enabled: boolean }> {
+  return jsonFetch<{ enabled: boolean }>({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/auto-converse`, bearer })
+}
+export async function setAutoConverse(bearer: string, agentId: string, enabled: boolean): Promise<{ enabled: boolean }> {
+  return jsonFetch<{ enabled: boolean }>({ method: 'PUT', path: `/agents/${encodeURIComponent(agentId)}/auto-converse`, bearer, body: { enabled } })
+}
+
+// A conversation paused at a soft checkpoint, awaiting continue / steer / wrap-up.
+export interface AutoCheckpoint {
+  connection_id: string
+  side: 'owner' | 'connector'
+  turn_count: number
+  purpose: string
+}
+export async function autoCheckpoints(bearer: string, agentId: string): Promise<AutoCheckpoint[]> {
+  const r = await jsonFetch<{ checkpoints: AutoCheckpoint[] }>({
+    method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/auto-checkpoints`, bearer,
+  })
+  return r.checkpoints
+}
+
+// Continue a checkpoint-paused conversation. An optional purpose re-points
+// (steers) both sides' goal; '' clears it back to free chat.
+export async function autoResume(bearer: string, agentId: string, connectionId: string, purpose?: string): Promise<AutoSession> {
+  return jsonFetch<AutoSession>({
+    method: 'POST',
+    path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-resume`,
+    bearer,
+    ...(purpose !== undefined ? { body: { purpose } } : {}),
+  })
 }
 export async function autoStop(bearer: string, agentId: string, connectionId: string): Promise<AutoSession> {
   return jsonFetch<AutoSession>({

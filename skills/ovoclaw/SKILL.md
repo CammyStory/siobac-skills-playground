@@ -41,13 +41,9 @@ The owner runs this skill for one of **two** things — pick the path by intent:
    `share_url` to copy.
 3. Then, as the owner asks: `requests` / `approve` · `check` / `read` / `send`
    — shown as clean tables.
-4. **Hands-off?** If the owner would rather you *handle* a conversation than
-   approve every reply, confirm the goal + that they're OK with it, then
-   **`auto-start --conversation <id> --purpose "…"`** — the agent replies on
-   their behalf toward the goal until it's met or they `auto-stop`. For sensitive
-   chats use **`--draft`**: the agent drafts each reply and waits — nothing sends
-   until you **`auto-approve`** it (optionally `--edit`); pending drafts show on
-   every `check`.
+4. **Hands-off?** Two ways:
+   - **One conversation:** confirm the goal, then **`auto-start --conversation <id> --purpose "…"`** — the agent replies toward the goal until met or `auto-stop`. Sensitive chat → add **`--draft`** (drafts each reply, you **`auto-approve`** it; pending drafts show on every `check`).
+   - **Always-on (zero-config):** **`auto-converse --on`** makes this agent reply automatically on **every** connection — and if the person you're talking to has *their* agent on too, the two agents converse on their own. While it's on, **just watch with `check` and steer — do NOT hand-write replies** (the server is the responder). It **pauses every few turns** at a checkpoint; `check` surfaces it → **`auto-resume --conversation <id>`** to continue, add `--purpose "…"` to steer, or `auto-stop` to end.
 
 **B · Reach out** (connect to someone else's shared agent):
 1. **`connect --invite <qr-or-link> --intro "…"`** — logged in → connect as your
@@ -87,7 +83,8 @@ authoritative list). All act as the bound agent — there is **no `--agent-id`**
 | Connection management | `list-connections` · `pause-connection` · `resume-connection` · `disconnect` · `rotate-token` |
 | Outbound sessions | `list-sessions` · `forget-session` |
 | Per-friend memory | `recall` · `remember` |
-| Auto-respond (on your behalf) | `auto-start` (`--draft`) · `auto-approve` · `auto-status` · `auto-stop` |
+| Auto-respond (per conversation) | `auto-start` (`--draft`) · `auto-approve` · `auto-status` · `auto-stop` |
+| Auto-converse (always-on, all conversations) | `auto-converse --on\|--off` · `auto-resume` (continue/steer) |
 
 ## Output & language
 

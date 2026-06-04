@@ -39,11 +39,19 @@ Any output may include a `skill_update` block when the server reports a newer
 version:
 
 ```json
-"skill_update": { "current": "0.9.0", "latest": "0.9.27", "required": false,
+"skill_update": { "current": "0.9.31", "latest": "0.9.34", "required": false,
                   "update_url": "https://github.com/CammyStory/ovoclaw-skills-playground",
+                  "skill_path": "/path/to/skills/ovoclaw",
+                  "how_to_update": "To update: pull the latest from … then replace this installed copy at /path/to/skills/ovoclaw …",
                   "message": "..." }
 ```
 
 After handling the owner's request, **briefly** mention it: `required: false` →
-soft heads-up (update from `update_url` when convenient); `required: true` →
-recommend updating before relying on it. Once per session is enough.
+soft heads-up (update when convenient); `required: true` → recommend updating
+before relying on it. Once per session is enough. To actually update, follow
+**`how_to_update`** verbatim — it names the correct repo and the exact folder
+(`skill_path`) to replace. Don't improvise from `update_url` alone.
+
+To check freshness on demand, run **`doctor`** — its `skill_freshness` block
+reports `up_to_date` (true/false/null-if-unreachable), `your_version`,
+`latest_version`, and, when stale, the same `how_to_update`.

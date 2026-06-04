@@ -995,14 +995,25 @@ async function persistSession(res: api.ConnectResponse, slug: string, host: stri
   if (!res.token || !res.token_expires_at || !res.your_user_id || !res.client_secret) {
     throw new CliError(`connect succeeded but the response is missing token fields (status ${res.status}).`)
   }
-  const handle = newSessionHandle()
+  // Stable conversation identity: if the server handed back a conversation we
+  // already have locally (the SAME registered friendship — reconnect, re-login,
+  // or a token re-mint all return the same conversation_id), REUSE that handle
+  // instead of minting a new one. This keeps "same agent → same conversation"
+  // and preserves lastSeq so history isn't re-read as new. A guest reconnect
+  // gets a fresh conversation_id from the server, so it correctly gets a new
+  // handle. Secondary fallback: an existing session on the same invite slug.
+  const prior = res.conversation_id
+    ? (await listSessions()).find((s) => s.conversationId === res.conversation_id)
+    : undefined
+  const handle = prior?.handle ?? newSessionHandle()
   await saveSession({
     handle, slug, host,
-    peerAgentName: res.peer_name,
+    peerAgentName: res.peer_name ?? prior?.peerAgentName,
     token: res.token, tokenExpiresAt: res.token_expires_at,
     clientUserId: res.your_user_id, clientSecret: res.client_secret,
-    conversationId: res.conversation_id, lastSeq: 0,
-    createdAt: new Date().toISOString(),
+    conversationId: res.conversation_id,
+    lastSeq: prior?.lastSeq ?? 0,
+    createdAt: prior?.createdAt ?? new Date().toISOString(),
   })
   return handle
 }

@@ -884,5 +884,31 @@ export async function pollConnectionReplies(host: string, token: string, sinceSe
   return inviteFetch<PollRepliesResponse>(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } })
 }
 
+// ── Connector-side auto-response (the agent that connected OUT drives ITS side).
+// Token-authed, full-URL like message/poll. Mirrors the owner-side auto-* but on
+// an OUTBOUND conversation. The server arms side='connector'. Registered
+// (logged-in) connections only — guests have no agent to auto-respond as.
+function authHdr(token: string, json = false): Record<string, string> {
+  return { ...(json ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${token}` }
+}
+export async function autoStartOut(host: string, token: string, purpose: string, maxTurns?: number, mode?: AutoMode): Promise<AutoSession> {
+  return inviteFetch<AutoSession>(`${host}/auto/start`, {
+    method: 'POST', headers: authHdr(token, true),
+    body: JSON.stringify({ purpose, ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}), ...(mode ? { mode } : {}) }),
+  })
+}
+export async function autoStopOut(host: string, token: string): Promise<AutoSession> {
+  return inviteFetch<AutoSession>(`${host}/auto/stop`, { method: 'POST', headers: authHdr(token) })
+}
+export async function autoStatusOut(host: string, token: string): Promise<AutoSession> {
+  return inviteFetch<AutoSession>(`${host}/auto/status`, { method: 'GET', headers: authHdr(token) })
+}
+export async function autoResumeOut(host: string, token: string, purpose?: string): Promise<AutoSession> {
+  return inviteFetch<AutoSession>(`${host}/auto/resume`, {
+    method: 'POST', headers: authHdr(token, purpose !== undefined),
+    ...(purpose !== undefined ? { body: JSON.stringify({ purpose }) } : {}),
+  })
+}
+
 // Re-export the AuthState type for convenience in cli.ts.
 export type { AuthState }

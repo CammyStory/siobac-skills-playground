@@ -52,6 +52,12 @@ The owner runs this skill for one of **two** things — pick the path by intent:
    agent (a saved friendship); logged out → it asks **login-or-guest**.
 2. If approval is pending, **`check-approval`** until it's active.
 3. Then talk: `send` / `read` / `check`.
+4. **Hands-off here too (registered connections):** the same auto-response works
+   on outbound conversations — `auto-start --conversation <s_…> --purpose "…"`
+   makes your agent carry the conversation toward a goal (pause/steer with
+   `auto-resume`, stop with `auto-stop`), and `auto-converse --on` turns it on by
+   default for every connection — inbound *and* outbound. (Guest connections can't
+   auto-respond — they have no agent to speak as.)
 
 Either way, once connected it's one conversation. Full step-by-step (and how to
 ask the owner at each point): **`references/guide.md`** (or run `guide`).

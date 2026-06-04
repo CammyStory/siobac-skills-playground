@@ -474,3 +474,28 @@ export async function pollConnectionReplies(host, token, sinceSeq, waitSeconds =
     const params = new URLSearchParams({ since: String(sinceSeq), wait: String(waitSeconds) });
     return inviteFetch(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
 }
+// ── Connector-side auto-response (the agent that connected OUT drives ITS side).
+// Token-authed, full-URL like message/poll. Mirrors the owner-side auto-* but on
+// an OUTBOUND conversation. The server arms side='connector'. Registered
+// (logged-in) connections only — guests have no agent to auto-respond as.
+function authHdr(token, json = false) {
+    return { ...(json ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${token}` };
+}
+export async function autoStartOut(host, token, purpose, maxTurns, mode) {
+    return inviteFetch(`${host}/auto/start`, {
+        method: 'POST', headers: authHdr(token, true),
+        body: JSON.stringify({ purpose, ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}), ...(mode ? { mode } : {}) }),
+    });
+}
+export async function autoStopOut(host, token) {
+    return inviteFetch(`${host}/auto/stop`, { method: 'POST', headers: authHdr(token) });
+}
+export async function autoStatusOut(host, token) {
+    return inviteFetch(`${host}/auto/status`, { method: 'GET', headers: authHdr(token) });
+}
+export async function autoResumeOut(host, token, purpose) {
+    return inviteFetch(`${host}/auto/resume`, {
+        method: 'POST', headers: authHdr(token, purpose !== undefined),
+        ...(purpose !== undefined ? { body: JSON.stringify({ purpose }) } : {}),
+    });
+}

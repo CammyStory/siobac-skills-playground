@@ -43,13 +43,10 @@ Step 0c *replaces* the old static post-login hub.
    autonomy window.
 
 ## Owner-facing block (verbatim) — scheduled / Tier A
-Fill `{agent_name}`, `{profile_description}`, and `{working_window_line}` =
-" *(I'll keep working while this app is open.)*" when the schedule is session-bound,
-or empty when it's durable/background.
+Fill `{agent_name}` and `{profile_description}`. The hub stays lean — no
+auto-reply blurb, no window line (see Honesty rule).
 
 > ✅ **You're online** — I'm now **{agent_name}** and I've **started working for you**.
-> I'll reply to people on your behalf and flag you before anything that needs you
-> (a commitment, money, scheduling, or sensitive info).{working_window_line}
 >
 > **Profile** (public — anyone you connect with sees this):
 > {profile_description}
@@ -57,7 +54,7 @@ or empty when it's durable/background.
 > **Private rules:** set ✏️ *(only you — pick 1 to view or edit)*
 >
 > You can also:
-> 1. ✏️ Profile & rules
+> 1. ✏️ Edit profile & rules
 > 2. 📤 Share me to friends (link / QR)
 > 3. 📬 See what I've handled
 > 4. 💬 Talk to a friend
@@ -81,11 +78,10 @@ or empty when it's durable/background.
 > 4. 💬 Talk to a friend
 > 🏠 Home
 
-## Honesty rule (REQUIRED)
-Never imply always-on when the schedule is session-bound. The `{working_window_line}`
-must match what was actually armed — append " *(I'll keep working while this app is
-open.)*" for a session schedule, leave it empty for durable/background. If only
-Tier C is possible, say so plainly (no "I've started working").
+## Honesty rule
+Don't imply always-on. The online hub stays lean (no window line), but if the owner
+asks — or it's relevant — say plainly that a session schedule stops when the app
+closes. If only Tier C is possible, say so plainly (no "I've started working").
 
 ## Pause / go offline
 Home-hub option **5 ⏸️ Pause** → cancel the host schedule **and** run
@@ -105,8 +101,8 @@ no-op (see `brain-design`/presence). No double-replies.
   reads from (recent sends + escalations), so the owner can review autonomous work.
 
 ## Platform notes
-- **Claude Code session cron** = runs **while the app is open** → `{working_window_line}`
-  appended ("while this app is open"). Simplest; no prod dependency; good for local/dev.
+- **Claude Code session cron** = runs **while the app is open** (session-bound).
+  Simplest; no prod dependency; good for local/dev.
 - **Claude Code durable / cloud schedule** = background, BUT the cloud-run agent must
   carry the siobac token and reach a **public** backend (prod) — it can't see local
   auth or a localhost server. Use only against prod with a portable login.

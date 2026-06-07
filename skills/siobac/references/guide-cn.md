@@ -218,45 +218,30 @@ the pattern, don't dead-end. (Owner-facing text in 中文.)
     > 3. 完成后告诉我。
     >
     > 然后我们就接着刚才的继续。
-  - **After `login --finish` → authenticated, EXISTING agent = the HOME HUB**
-    (`setup.state: existing`). Fill `{profile_description}` from `profile.description`:
-    > ✅ **已授权** —— 我现在以 **{agent_name}** 的身份行动。你已经设置好了：
-    >
-    > **资料**（公开——任何与你连接的人都能看到）：
-    > {profile_description}
-    >
-    > **私有规则：** 已设置 ✏️ *（只有你能看到——选 1 可查看或修改）*
-    >
-    > **接下来想做什么？**
-    > 1. ✏️ 资料与规则
-    > 2. 📤 分享你的分身（链接 / 二维码）
-    > 3. 📬 查看消息
-    > 4. 💬 和朋友聊天
-    >
-    > 回复数字，或者直接告诉我。
-  - **After `login --finish` → authenticated, NEW agent** (`agent_is_new: true`) —
-    same hub, but nudge profile first since nothing is set up yet:
-    > ✅ **已授权** —— 我现在以 **{agent_name}** 的身份行动。你是新用户——我们先做点设置，
-    > 让别人能联系到你。
-    >
-    > 最好的第一步是你的**资料与规则**（你是谁 + 我该如何代表你）。不过你也可以选其他的：
-    > 1. ✏️ 资料与规则 ← 从这里开始
-    > 2. 📤 分享你的分身（链接 / 二维码）
-    > 3. 📬 查看消息
-    > 4. 💬 和朋友聊天
-    >
-    > 回复数字，或者直接告诉我。
+  - **After `login --finish` → authenticated (EXISTING or NEW):** do **NOT** relay a
+    menu here and do **NOT** wait for the owner. **Go online automatically now (Step
+    0c)** — arm the scheduled `brain-tick` + `brain-heartbeat` — then relay the **Step
+    0c online hub** as the post-login screen (the 中文 online-hub block in Step 0c).
+    (NEW agent: after the online hub, nudge profile & rules as the first thing to
+    refine. EXISTING agent: the online hub shows the current profile/directive.) The
+    manual home hub is only the fallback when the host has no scheduler (Tier C — see
+    Step 0c).
   - **`login --finish` still pending** (`pending: true`)：
     > 看起来页面还没授权完成——在那边登录并点同意后告诉我，我来完成。
-- **Next →** **Step 0c (go online)** to start the autonomous loop — the agent works
-  for the owner on a schedule, not only when present; then Step 1 (design) if
-  new/unsure, else Step 2 (share). (For manual-only operation, skip 0c.)
+- **Next →** **Step 0c (go online) — IMMEDIATELY and AUTOMATICALLY.** The moment
+  `login --finish` returns `authenticated` (it sets `auto_go_online: true`), go online
+  **without being asked**: arm the scheduled `brain-tick` + `brain-heartbeat`, THEN
+  relay the online hub. **Never make "go online" a menu choice the owner has to pick**
+  — coming online is the DEFAULT on every login. Design (Step 1, if new) and share
+  (Step 2) happen AFTER, from the online hub. Skip 0c only if the owner has explicitly
+  said they want manual-only operation.
 
 ## Step 0c — Go online (start the autonomous loop)
 
-- **When:** right after login, in the autonomous model (the agent responds to others
-  on the owner's behalf via a scheduled tick — the "brain"). Skip if the owner wants
-  manual-only operation.
+- **When:** **immediately and automatically after `login --finish` → authenticated**
+  — the DEFAULT on every login (the CLI flags `auto_go_online: true`). Go online
+  **without the owner asking**; never make it a menu choice they must pick. Skip ONLY
+  if the owner has explicitly said they want manual-only operation.
 - **What it does:** arms a recurring `brain-tick` using **YOUR host platform's own
   scheduler** (a scheduled task / cron / loop — **no OS install, no extra
   permissions**), takes the wheel (presence → *agent-driving*), then shows the owner

@@ -451,15 +451,16 @@ async function cmdLoginFinish(_flags: Record<string, string | true>) {
           ? { state: 'new', guidance: 'This agent has NO public profile description and NO private directive yet. Before sharing, help the owner SET IT UP so it represents them well to others.' }
           : { state: 'existing', profile_complete: prof.profile_complete, directive_set: prof.directive_set, guidance: 'This agent already has a profile and/or directive (shown above). Show them to the owner and ASK whether to update either.' })
       : null,
+    auto_go_online: true,
     next_step: prof
       ? (prof.is_new
-          ? 'STEP 1 — design this agent (before sharing): tell the owner it has no profile/directive yet, then help them write (a) the PUBLIC profile `set-profile --description "…"` (who they are + what the agent may discuss — others read this) and (b) the PRIVATE `set-directive --content "…"` (rules/purpose + what to never reveal). STEP 2 — when they are happy, run `share-self` for the QR/link.'
-          : 'STEP 1 — show the owner the current `profile` + `directive` above and ASK if they want to update either: `set-profile --description "…"` and/or `set-directive --content "…"` (each keeps everything else). STEP 2 — when done, run `share-self` for the QR/link.')
-      : 'Show the owner this agent and ask how they want to set it up, then `share-self`.',
+          ? 'GO ONLINE NOW — this is the FIRST action after login and it is AUTOMATIC: do it immediately, do NOT wait for the owner to ask or pick it from a menu. Perform Step 0c (Go online — see "Step 0c" in references/guide-en.md / guide-cn.md): detect your host platform\'s recurring-agent scheduler; if it has one (Tier A), ARM a recurring `brain-tick` (~5 min) using the Tick prompt in `references/brain.md`, then run `brain-heartbeat` to take the wheel — THEN relay the ONLINE hub. (No scheduler/Tier C → relay the manual block + say plainly you only work while the owner is present.) ONLY AFTER you are online: this agent is NEW (no profile/directive), so nudge the owner to design it — (a) PUBLIC `set-profile --description "…"`, (b) PRIVATE `set-directive --content "…"` — and `share-self` for the QR/link. Being online does NOT wait on design/share.'
+          : 'GO ONLINE NOW — this is the FIRST action after login and it is AUTOMATIC: do it immediately, do NOT wait for the owner to ask or pick it from a menu. Perform Step 0c (Go online — see "Step 0c" in references/guide-en.md / guide-cn.md): detect your host platform\'s recurring-agent scheduler; if it has one (Tier A), ARM a recurring `brain-tick` (~5 min) using the Tick prompt in `references/brain.md`, then run `brain-heartbeat` to take the wheel — THEN relay the ONLINE hub showing the current `profile`/`directive`. (No scheduler/Tier C → relay the manual block + say plainly you only work while the owner is present.) From that hub the owner can still update profile/rules (`set-profile`/`set-directive`) or `share-self` — these are secondary to being online.')
+      : 'GO ONLINE NOW (Step 0c, automatic): arm a recurring `brain-tick` (~5 min) + run `brain-heartbeat`, then relay the online hub.',
     tell_owner: prof
       ? (prof.is_new
-          ? "Before I put you on Siobac, let's set you up: a short public description (who you are + what I can talk about) and your private rules for how I should act. Want to do that now?"
-          : "Here's how you're currently set up on Siobac — want to update your profile or rules before I share you, or keep them as they are?")
+          ? "✅ You're online — I've started working for you on a schedule. You're new here, so the best next step is your profile & rules (who you are + how I should act). Want to set that up now?"
+          : "✅ You're online — I've started working for you on a schedule. Want to tweak your profile or rules, or should I just keep watching things for you?")
       : undefined,
     remember: rememberLabel
       ? `You are now sharing the Siobac agent "${rememberLabel}" (id ${auth.agentId}). ` +

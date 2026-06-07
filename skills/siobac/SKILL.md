@@ -36,7 +36,7 @@ Siobac, not Siobac.
 The owner runs this skill for one of **two** things — pick the path by intent:
 
 **A · Be reachable** (share yourself so others can connect):
-1. **`login`** — show the approval link, wait for the user, then **`login --finish`** (two-step; binds to one agent).
+1. **`login`** — show the approval link, wait for the user, then **`login --finish`** (two-step; binds to one agent). **On `authenticated`, GO ONLINE AUTOMATICALLY — immediately, without being asked** (the CLI returns `auto_go_online: true`): arm a recurring `brain-tick` (~5 min) on your host's scheduler + run `brain-heartbeat` to take the wheel, then relay the **online hub**. This is the default on every login — see **Step 0c** in your language guide + `references/brain.md`. (No host scheduler → manual mode; say so plainly.)
 2. **`share-self`** → render `qr_markdown` **inline** as the QR image + give
    `share_url` to copy.
 3. Then, as the owner asks: `requests` / `approve` · `check` / `read` — shown as clean tables.

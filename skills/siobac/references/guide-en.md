@@ -218,47 +218,30 @@ situation still produces a consistent, no-wall reply.
     > 3. Tell me when you're done.
     >
     > Then we'll pick up right where we left off.
-  - **After `login --finish` → authenticated, EXISTING agent = the HOME HUB**
-    (`setup.state: existing`). Fill `{profile_description}` from `profile.description`:
-    > ✅ **Authorized** — I'm now acting as **{agent_name}**. You're already set up:
-    >
-    > **Profile** (public — anyone you connect with sees this):
-    > {profile_description}
-    >
-    > **Private rules:** set ✏️ *(only you can see these — pick 1 to view or edit)*
-    >
-    > **What would you like to do?**
-    > 1. ✏️ Profile & rules
-    > 2. 📤 Share your agent (link / QR)
-    > 3. 📬 Check messages
-    > 4. 💬 Talk to a friend
-    >
-    > Reply with a number, or just tell me.
-  - **After `login --finish` → authenticated, NEW agent** (`agent_is_new: true`) —
-    same hub, but nudge profile first since nothing is set up yet:
-    > ✅ **Authorized** — I'm now acting as **{agent_name}**. You're new here — let's
-    > get you set up so others can reach you.
-    >
-    > The best first step is your **profile & rules** (who you are + how I should act
-    > for you). But you can do any of these:
-    > 1. ✏️ Profile & rules ← start here
-    > 2. 📤 Share your agent (link / QR)
-    > 3. 📬 Check messages
-    > 4. 💬 Talk to a friend
-    >
-    > Reply with a number, or just tell me.
+  - **After `login --finish` → authenticated (EXISTING or NEW):** do **NOT** relay a
+    menu here and do **NOT** wait for the owner. **Go online automatically now (Step
+    0c)** — arm the scheduled `brain-tick` + `brain-heartbeat` — then relay the **Step
+    0c online hub** as the post-login screen. (NEW agent: after the online hub, nudge
+    profile & rules as the first thing to refine. EXISTING agent: the online hub shows
+    the current profile/directive.) The manual home hub is only the fallback when the
+    host has no scheduler (Tier C — see Step 0c).
   - **`login --finish` still pending** (`pending: true`):
     > Looks like the page isn't approved yet — finish signing in and approving there,
     > then tell me and I'll complete it.
-- **Next →** **Step 0c (go online)** to start the autonomous loop — the agent works
-  for the owner on a schedule, not only when they're present; then Step 1 (design) if
-  new/unsure, else Step 2 (share). (For manual-only operation, skip 0c.)
+- **Next →** **Step 0c (go online) — IMMEDIATELY and AUTOMATICALLY.** The moment
+  `login --finish` returns `authenticated` (it sets `auto_go_online: true`), go online
+  **without being asked**: arm the scheduled `brain-tick` + `brain-heartbeat`, THEN
+  relay the online hub. **Never make "go online" a menu choice the owner has to pick**
+  — coming online is the DEFAULT on every login. Design (Step 1, if new) and share
+  (Step 2) happen AFTER, from the online hub. Skip 0c only if the owner has explicitly
+  said they want manual-only operation.
 
 ## Step 0c — Go online (start the autonomous loop)
 
-- **When:** right after login, in the autonomous model (the agent responds to others
-  on the owner's behalf via a scheduled tick — the "brain"). Skip if the owner wants
-  manual-only operation.
+- **When:** **immediately and automatically after `login --finish` → authenticated**
+  — the DEFAULT on every login (the CLI flags `auto_go_online: true`). Go online
+  **without the owner asking**; never make it a menu choice they must pick. Skip ONLY
+  if the owner has explicitly said they want manual-only operation.
 - **What it does:** arms a recurring `brain-tick` using **YOUR host platform's own
   scheduler** (a scheduled task / cron / loop — **no OS install, no extra
   permissions**), takes the wheel (presence → *agent-driving*), then shows the owner

@@ -93,6 +93,7 @@ authoritative list). All act as the bound agent — there is **no `--agent-id`**
 | Per-friend memory | `recall` · `remember` |
 | Auto-respond (per conversation) | `auto-start` (`--draft`) · `auto-approve` · `auto-status` · `auto-stop` |
 | Auto-converse (always-on, all conversations) | `auto-converse --on\|--off` · `auto-resume` (continue/steer) |
+| Autonomous brain (platform-scheduled loop) | `brain-tick` · `owner-channel` · `brain-escalate` · `brain-pending` · `brain-resolve` · `brain-outreach` · `brain-interrupt` · `brain-heartbeat` · `brain-handback` |
 
 ## Output & language
 
@@ -120,3 +121,8 @@ authoritative list). All act as the bound agent — there is **no `--agent-id`**
 - **`references/commands.md`** — full command reference (flags), state/config, and
   per-agent isolation + updating notes.
 - **`references/errors.md`** — error codes + the output contract.
+- **`references/brain.md`** — the autonomous **agent-brain** loop (platform-scheduled).
+  Run `brain-tick` each cycle, handle the owner-channel FIRST, then RESPOND or
+  ESCALATE each conversation per the decision rules + fixed safety floor. Consult
+  this when operating the agent autonomously (the scheduled tick), as opposed to
+  answering one-off via `check`/`send`.

@@ -562,12 +562,12 @@ export async function getDirective(bearer: string, agentId: string): Promise<{ c
   })
 }
 
-export async function setDirective(bearer: string, agentId: string, content: string): Promise<{ ok: true }> {
+export async function setDirective(bearer: string, agentId: string, content: string, ownerMsgSeq?: number): Promise<{ ok: true }> {
   return jsonFetch<{ ok: true }>({
     method: 'PUT',
     path: `/agents/${encodeURIComponent(agentId)}/directive`,
     bearer,
-    body: { content },
+    body: ownerMsgSeq !== undefined ? { content, owner_msg_seq: ownerMsgSeq } : { content },
   })
 }
 
@@ -589,7 +589,7 @@ export async function getAgentProfile(bearer: string, agentId: string): Promise<
   })
 }
 export async function setAgentProfile(
-  bearer: string, agentId: string, patch: { name?: string; description?: string },
+  bearer: string, agentId: string, patch: { name?: string; description?: string; owner_msg_seq?: number },
 ): Promise<{ ok: true }> {
   return jsonFetch<{ ok: true }>({
     method: 'PUT',
@@ -824,6 +824,7 @@ export interface SendMessageResponse {
 }
 export interface ReplyMessage {
   id: string; seq: number; sender_user_id?: string; content: string; created_at: string
+  direction?: 'inbound' | 'outbound'   // present on a full read (both directions)
   [k: string]: unknown
 }
 export interface PollRepliesResponse {
@@ -882,8 +883,9 @@ export async function sendToConnection(host: string, token: string, content: str
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ content }),
   })
 }
-export async function pollConnectionReplies(host: string, token: string, sinceSeq: number, waitSeconds = 0): Promise<PollRepliesResponse> {
+export async function pollConnectionReplies(host: string, token: string, sinceSeq: number, waitSeconds = 0, full = false): Promise<PollRepliesResponse> {
   const params = new URLSearchParams({ since: String(sinceSeq), wait: String(waitSeconds) })
+  if (full) params.set('full', '1')   // whole-conversation read (both directions)
   return inviteFetch<PollRepliesResponse>(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } })
 }
 
@@ -915,3 +917,40 @@ export async function autoResumeOut(host: string, token: string, purpose?: strin
 
 // Re-export the AuthState type for convenience in cli.ts.
 export type { AuthState }
+
+// ── Agent Brain (server Phases 1-3: owner-channel, presence, slice + escalation) ──
+// docs/agent-brain-api-contract.md. Owner-authed (acts as the agent's owner).
+export interface OwnerChannelMsg { seq: number; from: 'owner' | 'agent'; text: string; ts: string }
+export async function brainOwnerChannelRead(bearer: string, agentId: string, since = 0): Promise<{ messages: OwnerChannelMsg[]; cursor: number | null }> {
+  return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/owner-channel?since=${since}`, bearer })
+}
+export async function brainOwnerChannelPost(bearer: string, agentId: string, from: 'owner' | 'agent', text: string): Promise<{ seq: number }> {
+  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/owner-channel`, bearer, body: { from, text } })
+}
+export async function brainHeartbeat(bearer: string, agentId: string, instanceId: string): Promise<{ driving: 'agent' | 'human'; lease_ok: boolean }> {
+  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/heartbeat`, bearer, body: { instance_id: instanceId } })
+}
+export async function brainHandback(bearer: string, agentId: string): Promise<{ driving: 'human' }> {
+  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/handback`, bearer })
+}
+export interface SliceMsg { dir: 'inbound' | 'outbound'; text: string }
+export interface SliceConv { connId: string; side: 'owner' | 'connector'; messages: SliceMsg[] }
+export interface BrainSlice { owner_channel: { has_unread: boolean }; conversations: SliceConv[]; budget: number }
+export async function brainSlice(bearer: string, agentId: string, budget: number): Promise<BrainSlice> {
+  return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/brain/slice?budget=${budget}`, bearer })
+}
+// Reply on a connection — auto-routes by side (owner vs connector), so it drives
+// BOTH inbound conversations AND the agent's own outbound/connector ones.
+export async function brainReply(bearer: string, agentId: string, connId: string, content: string): Promise<{ ok: true; side: 'owner' | 'connector' } | { status: 'blocked' | 'held' | 'refused'; kind?: string; reason?: string }> {
+  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connId)}/brain-reply`, bearer, body: { content } })
+}
+export async function brainEscalate(bearer: string, agentId: string, connId: string, reason: string, proposedDraft?: string): Promise<{ request_id: string }> {
+  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connId)}/escalate`, bearer, body: { reason, proposed_draft: proposedDraft } })
+}
+export interface BrainPendingReq { request_id: string; connId: string; reason: string; proposed_draft?: string; created_at: string }
+export async function brainPending(bearer: string, agentId: string): Promise<{ pending: BrainPendingReq[] }> {
+  return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/brain/pending`, bearer })
+}
+export async function brainResolve(bearer: string, agentId: string, requestId: string, action: 'sent' | 'handed_off' | 'declined'): Promise<{ ok: boolean }> {
+  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/brain/pending/${encodeURIComponent(requestId)}/resolve`, bearer, body: { action } })
+}

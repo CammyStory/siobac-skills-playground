@@ -297,12 +297,12 @@ export async function getDirective(bearer, agentId) {
         bearer,
     });
 }
-export async function setDirective(bearer, agentId, content) {
+export async function setDirective(bearer, agentId, content, ownerMsgSeq) {
     return jsonFetch({
         method: 'PUT',
         path: `/agents/${encodeURIComponent(agentId)}/directive`,
         bearer,
-        body: { content },
+        body: ownerMsgSeq !== undefined ? { content, owner_msg_seq: ownerMsgSeq } : { content },
     });
 }
 export async function getAgentProfile(bearer, agentId) {
@@ -473,8 +473,10 @@ export async function sendToConnection(host, token, content) {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ content }),
     });
 }
-export async function pollConnectionReplies(host, token, sinceSeq, waitSeconds = 0) {
+export async function pollConnectionReplies(host, token, sinceSeq, waitSeconds = 0, full = false) {
     const params = new URLSearchParams({ since: String(sinceSeq), wait: String(waitSeconds) });
+    if (full)
+        params.set('full', '1'); // whole-conversation read (both directions)
     return inviteFetch(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
 }
 // ── Connector-side auto-response (the agent that connected OUT drives ITS side).
@@ -501,4 +503,33 @@ export async function autoResumeOut(host, token, purpose) {
         method: 'POST', headers: authHdr(token, purpose !== undefined),
         ...(purpose !== undefined ? { body: JSON.stringify({ purpose }) } : {}),
     });
+}
+export async function brainOwnerChannelRead(bearer, agentId, since = 0) {
+    return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/owner-channel?since=${since}`, bearer });
+}
+export async function brainOwnerChannelPost(bearer, agentId, from, text) {
+    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/owner-channel`, bearer, body: { from, text } });
+}
+export async function brainHeartbeat(bearer, agentId, instanceId) {
+    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/heartbeat`, bearer, body: { instance_id: instanceId } });
+}
+export async function brainHandback(bearer, agentId) {
+    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/handback`, bearer });
+}
+export async function brainSlice(bearer, agentId, budget) {
+    return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/brain/slice?budget=${budget}`, bearer });
+}
+// Reply on a connection — auto-routes by side (owner vs connector), so it drives
+// BOTH inbound conversations AND the agent's own outbound/connector ones.
+export async function brainReply(bearer, agentId, connId, content) {
+    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connId)}/brain-reply`, bearer, body: { content } });
+}
+export async function brainEscalate(bearer, agentId, connId, reason, proposedDraft) {
+    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connId)}/escalate`, bearer, body: { reason, proposed_draft: proposedDraft } });
+}
+export async function brainPending(bearer, agentId) {
+    return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/brain/pending`, bearer });
+}
+export async function brainResolve(bearer, agentId, requestId, action) {
+    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/brain/pending/${encodeURIComponent(requestId)}/resolve`, bearer, body: { action } });
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { promises as fs, constants as fsConstants } from 'node:fs'
-import { platform, arch } from 'node:os'
+import { platform, arch, hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import {
@@ -648,7 +648,21 @@ async function actOnConnectionCmd(
   const connectionId = requireString(flags, idFlag, cmd)
   const { auth, agentId } = await requireBoundAgent()
   const result = await api.actOnConnection(auth.accessToken, agentId, connectionId, action)
-  ok({ status: doneStatus, agent_id: agentId, connection_id: connectionId, result })
+  const out: Record<string, unknown> = { status: doneStatus, agent_id: agentId, connection_id: connectionId, result }
+  if (action === 'accept') {
+    // The approved request_id IS the inbound connection id — and THAT is the
+    // handle for read/send, NOT result.conversation_id (an internal conv_… id
+    // the read/send endpoints reject with 404). Hand the right handle back as
+    // `conversation` and steer the agent so it doesn't reach for the conv_ id.
+    out.conversation = connectionId
+    out.next_step =
+      `Approved — you can talk on this conversation now. Read it with \`read --conversation ${connectionId}\` ` +
+      `and reply with \`send --conversation ${connectionId} --message "…"\`. Use THIS id (the connection id) as the ` +
+      `conversation handle — do NOT use the conv_… id in result.conversation_id (read/send reject it). ` +
+      `If auto-converse is on, the server replies automatically — just watch with \`check\`.`
+    out.tell_owner = "They're connected — I can read and reply to their messages now."
+  }
+  ok(out)
 }
 
 async function cmdAcceptPending(flags: Record<string, string | true>) {
@@ -974,8 +988,11 @@ async function cmdGetDirective(_flags: Record<string, string | true>) {
 
 async function cmdSetDirective(flags: Record<string, string | true>) {
   const content = requireString(flags, 'content', 'set-directive')
+  // H2: when the BRAIN edits the directive, it must cite the owner-channel message
+  // (seq) that asked for it. Owner/app edits omit it. (server enforces for agent tokens)
+  const ownerMsgSeq = optionalString(flags, 'owner-msg-seq')
   const { auth, agentId } = await requireBoundAgent()
-  await api.setDirective(auth.accessToken, agentId, content)
+  await api.setDirective(auth.accessToken, agentId, content, ownerMsgSeq !== undefined ? Number(ownerMsgSeq) : undefined)
   ok({
     status: 'ok', agent_id: agentId, updated: true,
     next_step: 'Private directive saved. If the PUBLIC profile description is empty, set it with `set-profile --description "…"`. When both reflect the owner, run `share-self`.',
@@ -1005,8 +1022,9 @@ async function cmdSetProfile(flags: Record<string, string | true>) {
   if (description === undefined && name === undefined) {
     throw new CliError('set-profile needs --description "<text>" and/or --name "<text>".')
   }
+  const ownerMsgSeq = optionalString(flags, 'owner-msg-seq') // H2: brain edits cite the owner-channel msg
   const { auth, agentId } = await requireBoundAgent()
-  await api.setAgentProfile(auth.accessToken, agentId, { description, name })
+  await api.setAgentProfile(auth.accessToken, agentId, { description, name, owner_msg_seq: ownerMsgSeq !== undefined ? Number(ownerMsgSeq) : undefined })
   ok({
     status: 'profile_updated',
     agent_id: agentId,
@@ -1139,8 +1157,8 @@ async function cmdRead(flags: Record<string, string | true>) {
   if (isActiveHandle(handle)) {
     const sess = await getSession(handle)
     if (!sess) throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`)
-    const res = await api.pollConnectionReplies(sess.host, sess.token, 0, 0)
-    ok({ status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null, messages: res.messages, last_seq: res.last_seq, note: "Active side shows the OTHER agent's replies (the connector transport doesn't echo your own sent messages)." })
+    const res = await api.pollConnectionReplies(sess.host, sess.token, 0, 0, /* full */ true)
+    ok({ status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null, messages: res.messages, last_seq: res.last_seq, note: 'Full conversation, both directions — each message is tagged `direction` (outbound = your own).' })
   }
   const { auth, agentId } = await requireBoundAgent()
   const since = optionalString(flags, 'since')
@@ -1384,6 +1402,159 @@ function cmdHelp(): never {
   })
 }
 
+// ── Agent Brain (platform-scheduled autonomous loop; docs/agent-brain-design.md) ──
+// The brain IS you (this agent) running a tick: heartbeat → slice → owner-channel
+// FIRST → friend conversations (RESPOND / ESCALATE). These commands are the
+// primitives; the per-tick procedure + decision rules live in SKILL.md
+// (`guide --step brain`). The LLM reasoning is yours — the server only stores.
+
+// Stable per-runtime id so the SAME machine keeps its lease across ticks (each
+// tick is a fresh process, so this must NOT be pid-based). A different machine
+// running the same agent gets a different id → the lease correctly contends.
+function brainInstanceId(): string {
+  return `siobac-brain-${hostname()}`
+}
+
+async function cmdBrainHeartbeat(_flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const res = await api.brainHeartbeat(auth.accessToken, agentId, brainInstanceId())
+  ok({
+    status: 'ok', ...res,
+    next_step: res.lease_ok
+      ? 'You hold the wheel. Run `brain-slice` to get this tick\'s work.'
+      : 'Another runtime holds the lease — back off this tick; do NOT act.',
+  })
+}
+
+async function cmdBrainHandback(_flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const res = await api.brainHandback(auth.accessToken, agentId)
+  ok({ status: 'ok', ...res, tell_owner: "Handed control back to you — I've stopped auto-driving." })
+}
+
+async function cmdBrainSlice(flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const budget = Math.max(1, Number(optionalString(flags, 'budget') ?? '1') || 1)
+  const res = await api.brainSlice(auth.accessToken, agentId, budget)
+  ok({
+    status: 'ok', ...res,
+    next_step: 'Handle owner_channel FIRST if has_unread (run `owner-channel`), THEN each conversation in order (read → decide RESPOND or ESCALATE). See `guide --step brain`.',
+  })
+}
+
+// owner-channel: no --message → READ (the owner<->you thread); with --message →
+// POST as the agent (talk back / clarify / answer / report).
+async function cmdOwnerChannel(flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const text = optionalString(flags, 'message')
+  if (text !== undefined) {
+    const res = await api.brainOwnerChannelPost(auth.accessToken, agentId, 'agent', text)
+    ok({ status: 'sent', ...res })
+    return
+  }
+  const since = Math.max(0, Number(optionalString(flags, 'since') ?? '0') || 0)
+  const res = await api.brainOwnerChannelRead(auth.accessToken, agentId, since)
+  ok({ status: 'ok', ...res })
+}
+
+async function cmdBrainEscalate(flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const connId = requireString(flags, 'conversation', 'brain-escalate')
+  const reason = requireString(flags, 'reason', 'brain-escalate')
+  const draft = optionalString(flags, 'draft')
+  const res = await api.brainEscalate(auth.accessToken, agentId, connId, reason, draft)
+  ok({ status: 'ok', ...res, tell_owner: "I've flagged this in our chat — it needs your call before I reply." })
+}
+
+async function cmdBrainPending(_flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const res = await api.brainPending(auth.accessToken, agentId)
+  ok({ status: 'ok', ...res })
+}
+
+async function cmdBrainResolve(flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const requestId = requireString(flags, 'request-id', 'brain-resolve')
+  const action = (optionalString(flags, 'action') ?? 'sent') as 'sent' | 'handed_off' | 'declined'
+  const res = await api.brainResolve(auth.accessToken, agentId, requestId, action)
+  ok({ status: 'ok', ...res })
+}
+
+// RESPOND on a conversation from a brain tick — works for BOTH inbound (owner) and
+// the agent's own outbound (connector) conversations; the server auto-routes by side.
+async function cmdBrainReply(flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const connId = requireString(flags, 'conversation', 'brain-reply')
+  const message = requireString(flags, 'message', 'brain-reply')
+  const res = await api.brainReply(auth.accessToken, agentId, connId, message)
+  ok({ status: 'sent', conversation: connId, ...res })
+}
+
+// Phase 8 — OWNER-TRIGGERED outreach. The agent NEVER self-initiates: run this
+// ONLY because the owner said so in the owner-channel ("go talk to X"). Sends an
+// opener into an existing connection; after that it's a normal conversation the
+// slice picks up. (New-connection-via-invite outreach uses `connect` + `send`
+// and is a later layer — the brain loop currently drives inbound connections.)
+async function cmdBrainOutreach(flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const connId = requireString(flags, 'conversation', 'brain-outreach')
+  const message = requireString(flags, 'message', 'brain-outreach')
+  const res = await api.postReply(auth.accessToken, agentId, connId, message)
+  ok({ status: 'sent', conversation: connId, ...res, note: 'Owner-triggered opener sent. It is now a normal conversation; the slice will surface their reply.' })
+}
+
+// Phase 8 — interrupt: the owner said "stop talking to Y". Pause the connection
+// so the slice skips it (resume later with `resume-connection`).
+async function cmdBrainInterrupt(flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const connId = requireString(flags, 'conversation', 'brain-interrupt')
+  await api.actOnConnection(auth.accessToken, agentId, connId, 'pause')
+  ok({ status: 'paused', conversation: connId, tell_owner: "Paused — I'll leave that conversation alone until you say otherwise (resume-connection to undo)." })
+}
+
+// One-shot TICK bundler — the entry point a scheduled run calls ONCE. Does the
+// whole mechanical half of a tick in a single command (heartbeat → lease check →
+// slice → pull the unread owner thread + each due conversation's recent
+// messages) so the scheduled agent just reads this, DECIDES, and acts. The LLM
+// reasoning (answer/clarify, RESPOND/ESCALATE, compose) stays the caller's job —
+// see references/brain.md.
+async function cmdBrainTick(flags: Record<string, string | true>) {
+  const { auth, agentId } = await requireBoundAgent()
+  const budget = Math.max(1, Number(optionalString(flags, 'budget') ?? '1') || 1)
+  const t = auth.accessToken
+
+  const hb = await api.brainHeartbeat(t, agentId, brainInstanceId())
+  if (!hb.lease_ok) {
+    ok({ status: 'skip', reason: 'lease_held_by_other_runtime', driving: hb.driving,
+      next_step: 'Another runtime is driving this agent — do NOTHING this tick.' })
+    return
+  }
+
+  const slice = await api.brainSlice(t, agentId, budget)
+
+  let ownerMessages: api.OwnerChannelMsg[] = []
+  if (slice.owner_channel.has_unread) {
+    const oc = await api.brainOwnerChannelRead(t, agentId, 0)
+    ownerMessages = oc.messages.slice(-12) // recent tail is enough to act in context
+  }
+
+  // The slice already embeds each conversation's recent messages (direction tagged
+  // per side: owner vs connector), so no extra read is needed — and connector-side
+  // conversations (where we reached out) are included too.
+  const conversations = slice.conversations
+
+  ok({
+    status: 'ok',
+    driving: hb.driving,
+    lease_ok: true,
+    budget,
+    owner_channel: { has_unread: slice.owner_channel.has_unread, messages: ownerMessages },
+    conversations,
+    next_step:
+      'Act per references/brain.md: (1) if owner_channel.has_unread, handle the OWNER first — answer/clarify via `owner-channel --message`, apply any command, and `brain-resolve` any approved escalation; (2) then for EACH conversation decide RESPOND (`send`) or ESCALATE (`brain-escalate`), one message each. If owner_channel has no unread and conversations is empty, the tick is done — nothing to do.',
+  })
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────
 
 async function main() {
@@ -1460,6 +1631,18 @@ async function main() {
     case 'set-profile':       return cmdSetProfile(flags)
     case 'get-directive':     return cmdGetDirective(flags)
     case 'set-directive':     return cmdSetDirective(flags)
+    // Agent Brain (platform-scheduled autonomous loop)
+    case 'brain-heartbeat':   return cmdBrainHeartbeat(flags)
+    case 'brain-handback':    return cmdBrainHandback(flags)
+    case 'brain-slice':       return cmdBrainSlice(flags)
+    case 'owner-channel':     return cmdOwnerChannel(flags)
+    case 'brain-escalate':    return cmdBrainEscalate(flags)
+    case 'brain-pending':     return cmdBrainPending(flags)
+    case 'brain-resolve':     return cmdBrainResolve(flags)
+    case 'brain-reply':       return cmdBrainReply(flags)
+    case 'brain-outreach':    return cmdBrainOutreach(flags)
+    case 'brain-interrupt':   return cmdBrainInterrupt(flags)
+    case 'brain-tick':        return cmdBrainTick(flags)
     default:
       throw new CliError(`Unknown subcommand: ${subcommand}. Run with --help to see available commands.`)
   }

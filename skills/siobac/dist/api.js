@@ -517,7 +517,7 @@ export async function brainHandback(bearer, agentId) {
     return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/handback`, bearer });
 }
 // Resume autonomous mode after a pause (server answers again). Autonomous is the
-// default, so this only undoes a prior pause/handback.
+// default, so this only undoes a prior pause.
 export async function brainGoOnline(bearer, agentId) {
     return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/online`, bearer });
 }

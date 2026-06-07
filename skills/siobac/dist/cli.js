@@ -1394,7 +1394,7 @@ async function cmdBrainTick(flags) {
     const t = auth.accessToken;
     const hb = await api.brainHeartbeat(t, agentId, brainInstanceId());
     if (!hb.lease_ok) {
-        ok({ status: 'skip', reason: 'lease_held_by_other_runtime', driving: hb.driving,
+        ok({ status: 'skip', reason: 'lease_held_by_other_runtime', mode: hb.mode,
             next_step: 'Another runtime is driving this agent — do NOTHING this tick.' });
         return;
     }
@@ -1410,7 +1410,7 @@ async function cmdBrainTick(flags) {
     const conversations = slice.conversations;
     ok({
         status: 'ok',
-        driving: hb.driving,
+        mode: hb.mode,
         lease_ok: true,
         budget,
         owner_channel: { has_unread: slice.owner_channel.has_unread, messages: ownerMessages },

@@ -933,6 +933,12 @@ export async function brainHeartbeat(bearer: string, agentId: string, instanceId
 export async function brainHandback(bearer: string, agentId: string): Promise<{ driving: 'human' }> {
   return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/handback`, bearer })
 }
+export interface BrainPresence { driving: 'agent' | 'human'; online: boolean; last_tick_at: string | null; seconds_since_tick: number | null; offline_after_ms: number }
+// Read-only online check (does NOT take the wheel). Used by the owner-interaction
+// presence guard: if !online, the schedule silently dropped — re-arm + tell owner.
+export async function brainPresence(bearer: string, agentId: string): Promise<BrainPresence> {
+  return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/presence`, bearer })
+}
 export interface SliceMsg { dir: 'inbound' | 'outbound'; text: string }
 export interface SliceConv { connId: string; side: 'owner' | 'connector'; messages: SliceMsg[] }
 export interface BrainSlice { owner_channel: { has_unread: boolean }; conversations: SliceConv[]; budget: number }

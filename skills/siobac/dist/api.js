@@ -516,6 +516,11 @@ export async function brainHeartbeat(bearer, agentId, instanceId) {
 export async function brainHandback(bearer, agentId) {
     return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/handback`, bearer });
 }
+// Read-only online check (does NOT take the wheel). Used by the owner-interaction
+// presence guard: if !online, the schedule silently dropped — re-arm + tell owner.
+export async function brainPresence(bearer, agentId) {
+    return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/presence`, bearer });
+}
 export async function brainSlice(bearer, agentId, budget) {
     return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/brain/slice?budget=${budget}`, bearer });
 }

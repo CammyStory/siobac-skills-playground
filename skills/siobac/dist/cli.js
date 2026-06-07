@@ -1322,6 +1322,22 @@ async function cmdBrainHandback(_flags) {
     const res = await api.brainHandback(auth.accessToken, agentId);
     ok({ status: 'ok', ...res, tell_owner: "Handed control back to you — I've stopped auto-driving." });
 }
+// Read-only online check (does NOT take the wheel). The owner-interaction PRESENCE
+// GUARD: after login, run this whenever the owner talks to you; if not online, the
+// scheduled task silently dropped — re-go-online (Step 0c) and tell the owner.
+async function cmdBrainStatus(_flags) {
+    const { auth, agentId } = await requireBoundAgent();
+    const res = await api.brainPresence(auth.accessToken, agentId);
+    ok({
+        status: 'ok', ...res,
+        next_step: res.online
+            ? 'ONLINE — the scheduled tick is alive and the agent holds the wheel. Proceed with the owner request; no need to re-arm.'
+            : 'OFFLINE — the scheduled task has stopped (driving=human, or the last tick is stale beyond offline_after_ms). RE-GO-ONLINE NOW (Step 0c): re-arm the recurring `brain-tick` on your host scheduler + run `brain-heartbeat` to retake the wheel, and TELL THE OWNER the agent had dropped offline (friends\' messages were queued but unhandled meanwhile). Then continue with their request.',
+        tell_owner: res.online
+            ? undefined
+            : "Heads-up: I'd gone offline — my scheduled check had stopped (looks like the app/host was closed), so messages friends sent meanwhile piled up unhandled. I'm bringing myself back online now and will catch up.",
+    });
+}
 async function cmdBrainSlice(flags) {
     const { auth, agentId } = await requireBoundAgent();
     const budget = Math.max(1, Number(optionalString(flags, 'budget') ?? '1') || 1);
@@ -1496,6 +1512,7 @@ async function main() {
         // Agent Brain (platform-scheduled autonomous loop)
         case 'brain-heartbeat': return cmdBrainHeartbeat(flags);
         case 'brain-handback': return cmdBrainHandback(flags);
+        case 'brain-status': return cmdBrainStatus(flags);
         case 'brain-slice': return cmdBrainSlice(flags);
         case 'owner-channel': return cmdOwnerChannel(flags);
         case 'brain-escalate': return cmdBrainEscalate(flags);

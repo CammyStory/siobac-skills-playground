@@ -296,6 +296,18 @@ situation still produces a consistent, no-wall reply.
 - **Single-runtime:** two devices arming a schedule for the same agent is safe — the
   `brain-heartbeat` instance lease grants ONE driver; the other's ticks get
   `lease_ok:false` and no-op.
+- **Presence guard — online check on EVERY owner interaction (after login):** the
+  scheduled task can die silently (host app/session closed, machine slept), and while
+  it's down friends' messages still arrive on the server, queued but UNHANDLED. So
+  whenever the owner talks to you after login, **FIRST run `brain-status`** (read-only —
+  it does NOT take the wheel). It returns `online` (`driving==agent` AND the last tick
+  is fresh within `offline_after_ms`), `driving`, and `seconds_since_tick`.
+  - **`online:false`** → the agent had dropped offline. (1) **Tell the owner** plainly
+    that the agent went offline (its scheduled check stopped) and anything that came in
+    meanwhile is unhandled; (2) **re-go-online** — re-arm the recurring `brain-tick`
+    (idempotent — reuse any existing schedule) + `brain-heartbeat` to retake the wheel;
+    (3) run a catch-up `brain-tick`, THEN handle their request.
+  - **`online:true`** → just proceed with their request.
 - **Next →** the loop runs itself; the owner steers via the hub or pauses. Design
   (Step 1) / share (Step 2) still work normally while online.
 

@@ -120,7 +120,7 @@ double-replying — see Presence.)
 
 ## Commands (primitives)
 
-`brain-heartbeat` · `brain-handback` · `brain-slice [--budget N]` ·
+`brain-heartbeat` · `brain-handback` · `brain-status` (read-only online check — run on owner interaction; if `online:false` re-arm + tell the owner) · `brain-slice [--budget N]` ·
 `owner-channel [--since N] [--message "<text>"]` ·
 `brain-escalate --conversation <id> --reason "<why>" [--draft "<reply>"]` ·
 `brain-pending` · `brain-resolve --request-id <id> [--action sent|handed_off|declined]` ·

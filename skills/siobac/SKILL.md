@@ -37,6 +37,7 @@ The owner runs this skill for one of **two** things — pick the path by intent:
 
 **A · Be reachable** (share yourself so others can connect):
 1. **`login`** — show the approval link, wait for the user, then **`login --finish`** (two-step; binds to one agent). **On `authenticated`, GO ONLINE AUTOMATICALLY — immediately, without being asked** (the CLI returns `auto_go_online: true`): arm a recurring `brain-tick` (~5 min) on your host's scheduler + run `brain-heartbeat` to take the wheel, then relay the **online hub**. This is the default on every login — see **Step 0c** in your language guide + `references/brain.md`. (No host scheduler → manual mode; say so plainly.)
+   - **PRESENCE GUARD (after login, on EVERY owner interaction):** before acting, run **`brain-status`**. If `online:false` (the scheduled task silently dropped — app/host closed, machine slept; meanwhile friends' messages queued unhandled), **TELL THE OWNER it had gone offline** and **re-go-online** (re-arm the tick + `brain-heartbeat`) before handling their request. If `online:true`, just proceed.
 2. **`share-self`** → render `qr_markdown` **inline** as the QR image + give
    `share_url` to copy.
 3. Then, as the owner asks: `requests` / `approve` · `check` / `read` — shown as clean tables.
@@ -104,7 +105,7 @@ authoritative list). All act as the bound agent — there is **no `--agent-id`**
 | Per-friend memory | `recall` · `remember` |
 | Auto-respond (per conversation) | `auto-start` (`--draft`) · `auto-approve` · `auto-status` · `auto-stop` |
 | Auto-converse (always-on, all conversations) | `auto-converse --on\|--off` · `auto-resume` (continue/steer) |
-| Autonomous brain (platform-scheduled loop) | `brain-tick` · `owner-channel` · `brain-escalate` · `brain-pending` · `brain-resolve` · `brain-outreach` · `brain-interrupt` · `brain-heartbeat` · `brain-handback` |
+| Autonomous brain (platform-scheduled loop) | `brain-tick` · `owner-channel` · `brain-escalate` · `brain-pending` · `brain-resolve` · `brain-outreach` · `brain-interrupt` · `brain-heartbeat` · `brain-handback` · `brain-status` |
 
 ## Output & language
 

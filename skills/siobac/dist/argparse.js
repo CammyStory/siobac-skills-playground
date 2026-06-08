@@ -3,6 +3,13 @@
 //   --flag=value
 //   --boolean (when next token is missing or another flag)
 //   positional args (any token not preceded by an unconsumed --flag)
+//
+// A "real flag" is `--` followed by a LETTER (e.g. --message). A token that
+// starts with dashes but NOT a letter (e.g. a markdown list "- item", or a PEM
+// block "-----BEGIN …") is a VALUE, not a flag — so a value beginning with a
+// dash is accepted after a value-flag. For the rare value that genuinely looks
+// like a flag (`--word …`), use the `--flag=value` form.
+const REAL_FLAG = /^--[A-Za-z]/;
 export function parseArgs(argv) {
     const positional = [];
     const flags = {};
@@ -19,7 +26,7 @@ export function parseArgs(argv) {
             continue;
         }
         const next = argv[i + 1];
-        if (next !== undefined && !next.startsWith('--')) {
+        if (next !== undefined && !REAL_FLAG.test(next)) {
             flags[body] = next;
             i++;
         }

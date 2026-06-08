@@ -73,7 +73,8 @@ node siobac-skills-playground/skills/siobac/dist/cli.js doctor
 
 | 环境变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `SIOBAC_API_BASE` | `https://ovo.ovoclaw.com/dev` | 咻叭 API 主机。此测试版本默认指向 **dev** 环境；生产环境请设为 `https://api.ovoclaw.com`，或填自托管端点。（主动联系时，邀请链接自带的主机优先。） |
+| `SIOBAC_ENV` | `prod` | 选择环境。默认指向**生产环境**（`https://api.ovoclaw.com`）。设为 `dev`（或 `SIOBAC_DEV=1`）可切换到 **dev 隧道**（`https://ovo.ovoclaw.com/dev`）用于测试。 |
+| `SIOBAC_API_BASE` | _(未设置)_ | 完整 URL，会完全覆盖 `SIOBAC_ENV`——可指向任意自托管端点（仍兼容旧的 `OVOCLAW_API_BASE`）。主动联系时，邀请链接自带的主机优先。`doctor` 会报告解析出的环境（prod/dev/custom）。 |
 
 ## 状态存放在哪里
 

@@ -48,15 +48,36 @@ export function makeApiError(
   return err
 }
 
-// This is the TEST/playground build: it targets the dev environment (the /dev
-// tunnel to the local server) so testing never touches public production data.
-// The polished public release points at https://api.ovoclaw.com instead.
-// (The Siobac brand keeps the ovoclaw.com backend domain.) Override anytime with
-// SIOBAC_API_BASE (legacy OVOCLAW_API_BASE still honored).
-const DEFAULT_API_BASE = 'https://ovo.ovoclaw.com/dev'
+// PRODUCTION is the default — a fresh install talks to the public server. The
+// dev environment (the /dev tunnel to a local server) is OPT-IN, so testing is a
+// deliberate choice and a release can never accidentally ship pointed at dev.
+// (The Siobac brand keeps the ovoclaw.com backend domain.)
+//
+// Base resolution, in priority order:
+//   1. SIOBAC_API_BASE (or legacy OVOCLAW_API_BASE) — an explicit full URL; wins.
+//   2. SIOBAC_ENV=dev (alias: development/staging, or SIOBAC_DEV=1) — the dev tunnel.
+//   3. default — production.
+const PROD_API_BASE = 'https://api.ovoclaw.com'
+const DEV_API_BASE = 'https://ovo.ovoclaw.com/dev'
+
+function devOptIn(): boolean {
+  const env = (process.env.SIOBAC_ENV ?? '').trim().toLowerCase()
+  if (env === 'dev' || env === 'development' || env === 'staging') return true
+  const flag = (process.env.SIOBAC_DEV ?? '').trim().toLowerCase()
+  return flag === '1' || flag === 'true' || flag === 'yes'
+}
 
 export function getApiBase(): string {
-  return process.env.SIOBAC_API_BASE ?? process.env.OVOCLAW_API_BASE ?? DEFAULT_API_BASE
+  const explicit = process.env.SIOBAC_API_BASE ?? process.env.OVOCLAW_API_BASE
+  if (explicit) return explicit
+  return devOptIn() ? DEV_API_BASE : PROD_API_BASE
+}
+
+// Which environment getApiBase() resolved to — for diagnostics (doctor).
+// 'custom' = an explicit SIOBAC_API_BASE/OVOCLAW_API_BASE URL is set.
+export function getApiEnv(): 'prod' | 'dev' | 'custom' {
+  if (process.env.SIOBAC_API_BASE ?? process.env.OVOCLAW_API_BASE) return 'custom'
+  return devOptIn() ? 'dev' : 'prod'
 }
 
 // ── Skill update reminder ─────────────────────────────────────────────
@@ -648,147 +669,6 @@ export async function submitMemory(
   })
 }
 
-// ── Auto-Response (server-driven; docs/auto-response-design.md) ──────
-// The owner hands a connection a natural-language PURPOSE; the server's
-// event-driven loop composes (LLM) + sends each reply IN CHARACTER on the
-// owner's behalf, toward the purpose, until it's met / capped / the owner stops.
-// Owner-side, one inbound connection at a time.
-// mode: 'auto' = compose + SEND each reply directly; 'draft' = hold each reply
-// for the owner to approve (auto-approve) before it sends.
-export type AutoMode = 'auto' | 'draft'
-export interface AutoSession {
-  id?: string
-  connection_id?: string
-  agent_id?: string
-  purpose?: string
-  status: 'running' | 'paused_checkpoint' | 'done' | 'interrupted' | 'stalled' | 'failed' | 'none' | 'no_draft'
-  mode?: AutoMode
-  turn_count?: number
-  max_turns?: number
-  result_summary?: string | null
-  reason?: string | null
-  // Draft mode: the reply waiting for approval (auto-status surfaces it too).
-  pending_draft?: string | null
-  pending_draft_done?: number
-  created_at?: string
-  updated_at?: string
-  last_tick_at?: string | null
-  warning?: string   // e.g. relay-backed agent (auto only fills in while offline)
-}
-
-export async function autoStart(
-  bearer: string, agentId: string, connectionId: string, purpose: string, maxTurns?: number, mode?: AutoMode,
-): Promise<AutoSession> {
-  return jsonFetch<AutoSession>({
-    method: 'POST',
-    path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-start`,
-    bearer,
-    body: { purpose, ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}), ...(mode ? { mode } : {}) },
-  })
-}
-
-// Draft mode: approve (optionally edited) the reply the agent drafted, sending
-// it and advancing the session.
-export async function autoApprove(
-  bearer: string, agentId: string, connectionId: string, edited?: string,
-): Promise<AutoSession> {
-  return jsonFetch<AutoSession>({
-    method: 'POST',
-    path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-approve`,
-    bearer,
-    ...(edited !== undefined ? { body: { edited } } : {}),
-  })
-}
-
-// Recurring report: draft-mode replies waiting for owner approval, across the
-// bound agent's connections. `check` surfaces these every time until handled.
-export interface AutoDraft {
-  connection_id: string
-  purpose: string
-  turn_count: number
-  draft: string
-  would_finalize: boolean
-}
-export async function autoDrafts(bearer: string, agentId: string): Promise<AutoDraft[]> {
-  const r = await jsonFetch<{ drafts: AutoDraft[] }>({
-    method: 'GET',
-    path: `/agents/${encodeURIComponent(agentId)}/auto-drafts`,
-    bearer,
-  })
-  return r.drafts
-}
-
-// ── Auto-converse v2: per-agent opt-in + checkpoints + resume ─────────────
-// When auto_converse is ON, every connection this agent is part of auto-responds
-// by default (no auto-start) — and if the other end's agent is also on, the two
-// agents converse on their own. The owner watches via `check` and steers via
-// auto-resume; a soft checkpoint pauses them every few turns.
-export async function getAutoConverse(bearer: string, agentId: string): Promise<{ enabled: boolean }> {
-  return jsonFetch<{ enabled: boolean }>({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/auto-converse`, bearer })
-}
-export async function setAutoConverse(bearer: string, agentId: string, enabled: boolean): Promise<{ enabled: boolean }> {
-  return jsonFetch<{ enabled: boolean }>({ method: 'PUT', path: `/agents/${encodeURIComponent(agentId)}/auto-converse`, bearer, body: { enabled } })
-}
-
-// A conversation paused at a soft checkpoint, awaiting continue / steer / wrap-up.
-export interface AutoCheckpoint {
-  connection_id: string
-  side: 'owner' | 'connector'
-  turn_count: number
-  purpose: string
-}
-export async function autoCheckpoints(bearer: string, agentId: string): Promise<AutoCheckpoint[]> {
-  const r = await jsonFetch<{ checkpoints: AutoCheckpoint[] }>({
-    method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/auto-checkpoints`, bearer,
-  })
-  return r.checkpoints
-}
-
-// Continue a checkpoint-paused conversation. An optional purpose re-points
-// (steers) both sides' goal; '' clears it back to free chat.
-export async function autoResume(bearer: string, agentId: string, connectionId: string, purpose?: string): Promise<AutoSession> {
-  return jsonFetch<AutoSession>({
-    method: 'POST',
-    path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-resume`,
-    bearer,
-    ...(purpose !== undefined ? { body: { purpose } } : {}),
-  })
-}
-export async function autoStop(bearer: string, agentId: string, connectionId: string): Promise<AutoSession> {
-  return jsonFetch<AutoSession>({
-    method: 'POST',
-    path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-stop`,
-    bearer,
-  })
-}
-export async function autoStatus(bearer: string, agentId: string, connectionId: string): Promise<AutoSession> {
-  return jsonFetch<AutoSession>({
-    method: 'GET',
-    path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-status`,
-    bearer,
-  })
-}
-
-// Report-back: finished auto-sessions the owner hasn't been shown yet (drains
-// them, each surfaced once). `check` calls this so the agent can tell the owner
-// the outcome of an auto-conversation that ran while they were away.
-export interface AutoUpdate {
-  connection_id: string
-  status: 'done' | 'stalled' | 'failed'
-  purpose?: string
-  turn_count?: number
-  result_summary?: string | null
-  reason?: string | null
-}
-export async function autoUpdates(bearer: string, agentId: string): Promise<AutoUpdate[]> {
-  const r = await jsonFetch<{ updates: AutoUpdate[] }>({
-    method: 'GET',
-    path: `/agents/${encodeURIComponent(agentId)}/auto-updates`,
-    bearer,
-  })
-  return r.updates
-}
-
 // ── Reach-out transport (active connect) ─────────────────────────────
 // These talk to a FULL host (resolved from the invite by parseInvite), not
 // getApiBase(): an invite can point at any server/prefix. connect/manifest are
@@ -796,7 +676,9 @@ export async function autoUpdates(bearer: string, agentId: string): Promise<Auto
 // at connect. (A logged-in connect ALSO passes the owner login bearer so the
 // server makes it a REGISTERED friendship; guest connect passes none.)
 export interface Manifest {
-  agent: { id: string; name: string; description?: string; status?: string }
+  // The PUBLIC manifest deliberately omits the internal agent `id` (unauthenticated
+  // endpoint) — verify by `name`, not `id`. `id` stays optional in case a server adds it.
+  agent: { id?: string; name: string; description?: string; status?: string }
   ovo_protocol?: string
   requires_approval?: boolean
   [k: string]: unknown
@@ -889,46 +771,19 @@ export async function pollConnectionReplies(host: string, token: string, sinceSe
   return inviteFetch<PollRepliesResponse>(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } })
 }
 
-// ── Connector-side auto-response (the agent that connected OUT drives ITS side).
-// Token-authed, full-URL like message/poll. Mirrors the owner-side auto-* but on
-// an OUTBOUND conversation. The server arms side='connector'. Registered
-// (logged-in) connections only — guests have no agent to auto-respond as.
-function authHdr(token: string, json = false): Record<string, string> {
-  return { ...(json ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${token}` }
-}
-export async function autoStartOut(host: string, token: string, purpose: string, maxTurns?: number, mode?: AutoMode): Promise<AutoSession> {
-  return inviteFetch<AutoSession>(`${host}/auto/start`, {
-    method: 'POST', headers: authHdr(token, true),
-    body: JSON.stringify({ purpose, ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}), ...(mode ? { mode } : {}) }),
-  })
-}
-export async function autoStopOut(host: string, token: string): Promise<AutoSession> {
-  return inviteFetch<AutoSession>(`${host}/auto/stop`, { method: 'POST', headers: authHdr(token) })
-}
-export async function autoStatusOut(host: string, token: string): Promise<AutoSession> {
-  return inviteFetch<AutoSession>(`${host}/auto/status`, { method: 'GET', headers: authHdr(token) })
-}
-export async function autoResumeOut(host: string, token: string, purpose?: string): Promise<AutoSession> {
-  return inviteFetch<AutoSession>(`${host}/auto/resume`, {
-    method: 'POST', headers: authHdr(token, purpose !== undefined),
-    ...(purpose !== undefined ? { body: JSON.stringify({ purpose }) } : {}),
-  })
-}
-
 // Re-export the AuthState type for convenience in cli.ts.
 export type { AuthState }
 
-// ── Agent Brain (server Phases 1-3: owner-channel, presence, slice + escalation) ──
+// ── Agent Brain — owner surface (the brain itself runs on the SERVER) ──
 // docs/agent-brain-api-contract.md. Owner-authed (acts as the agent's owner).
+// Owner-channel, presence (online/paused), and escalation handling
+// (pending/resolve) — no client tick/loop/slice; the server is the responder.
 export interface OwnerChannelMsg { seq: number; from: 'owner' | 'agent'; text: string; ts: string }
 export async function brainOwnerChannelRead(bearer: string, agentId: string, since = 0): Promise<{ messages: OwnerChannelMsg[]; cursor: number | null }> {
   return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/owner-channel?since=${since}`, bearer })
 }
 export async function brainOwnerChannelPost(bearer: string, agentId: string, from: 'owner' | 'agent', text: string): Promise<{ seq: number }> {
   return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/owner-channel`, bearer, body: { from, text } })
-}
-export async function brainHeartbeat(bearer: string, agentId: string, instanceId: string): Promise<{ mode: 'auto' | 'paused'; lease_ok: boolean }> {
-  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/heartbeat`, bearer, body: { instance_id: instanceId } })
 }
 export async function brainHandback(bearer: string, agentId: string): Promise<{ mode: 'paused' }> {
   return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/handback`, bearer })
@@ -939,29 +794,15 @@ export async function brainGoOnline(bearer: string, agentId: string): Promise<{ 
   return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/online`, bearer })
 }
 export interface BrainPresence { mode: 'auto' | 'paused'; online: boolean; last_tick_at: string | null; seconds_since_tick: number | null; offline_after_ms: number }
-// Read-only online check (does NOT take the wheel). Used by the owner-interaction
-// presence guard: if !online, the schedule silently dropped — re-arm + tell owner.
+// Read-only check of the server-reported autonomous mode (online vs paused).
+// online=false means the owner paused — surface that; nothing to re-arm (server-driven).
 export async function brainPresence(bearer: string, agentId: string): Promise<BrainPresence> {
   return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/presence`, bearer })
-}
-export interface SliceMsg { dir: 'inbound' | 'outbound'; text: string }
-export interface SliceConv { connId: string; side: 'owner' | 'connector'; messages: SliceMsg[] }
-export interface BrainSlice { owner_channel: { has_unread: boolean }; conversations: SliceConv[]; budget: number }
-export async function brainSlice(bearer: string, agentId: string, budget: number): Promise<BrainSlice> {
-  return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/brain/slice?budget=${budget}`, bearer })
-}
-// Reply on a connection — auto-routes by side (owner vs connector), so it drives
-// BOTH inbound conversations AND the agent's own outbound/connector ones.
-export async function brainReply(bearer: string, agentId: string, connId: string, content: string): Promise<{ ok: true; side: 'owner' | 'connector' } | { status: 'blocked' | 'held' | 'refused'; kind?: string; reason?: string }> {
-  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connId)}/brain-reply`, bearer, body: { content } })
-}
-export async function brainEscalate(bearer: string, agentId: string, connId: string, reason: string, proposedDraft?: string): Promise<{ request_id: string }> {
-  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connId)}/escalate`, bearer, body: { reason, proposed_draft: proposedDraft } })
 }
 export interface BrainPendingReq { request_id: string; connId: string; reason: string; proposed_draft?: string; created_at: string }
 export async function brainPending(bearer: string, agentId: string): Promise<{ pending: BrainPendingReq[] }> {
   return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/brain/pending`, bearer })
 }
-export async function brainResolve(bearer: string, agentId: string, requestId: string, action: 'sent' | 'handed_off' | 'declined'): Promise<{ ok: boolean }> {
-  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/brain/pending/${encodeURIComponent(requestId)}/resolve`, bearer, body: { action } })
+export async function brainResolve(bearer: string, agentId: string, requestId: string, action: 'sent' | 'handed_off' | 'declined', content?: string): Promise<{ ok: boolean; sent?: boolean }> {
+  return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/brain/pending/${encodeURIComponent(requestId)}/resolve`, bearer, body: content !== undefined ? { action, content } : { action } })
 }

@@ -2,7 +2,7 @@
 
 The agent's autonomous replying happens on the **server** (composed by 豆包 from the
 agent's directive + profile + per-friend memory), NOT in this skill. **There is no
-client loop** — no `brain-tick`, heartbeat, cron, or long-poll. This skill only:
+client loop** — no client-side tick, cron, or scheduler. This skill only:
 sets up the agent, toggles autonomous mode, and lets the owner handle escalations.
 
 Design: `ovoclaw/docs/agent-brain-design.md`.
@@ -51,8 +51,7 @@ When the server escalates, it shows up in the owner's inbox. The skill surfaces 
 and acts on the owner's decision:
 
 - **`brain-pending`** — list open escalations (reason + proposed draft).
-- **Owner approves / edits** → `send --conversation <id> --message "<the (edited) draft>"`,
-  then `brain-resolve --request-id <id> --action sent`.
+- **Owner approves / edits** → `brain-resolve --request-id <id> --action sent --message "<the (edited) draft>"` — this DELIVERS the reply (scan-bypassed, since the owner approved it) **and** clears the hold in one step. Do NOT also run a separate `send` for it. (Omit `--message` to send the held draft as-is.)
 - **Owner says "I'll handle it"** → `brain-resolve --request-id <id> --action handed_off`.
 - **Owner declines** → send a polite decline (or nothing), then
   `brain-resolve --request-id <id> --action declined`.
@@ -80,7 +79,7 @@ owner instruction, never from friend input (security H2).
 
 `brain-status` (online vs paused) · `pause` · `go-online` ·
 `owner-channel [--since N] [--message "<text>"]` ·
-`brain-pending` · `brain-resolve --request-id <id> [--action sent|handed_off|declined]` ·
+`brain-pending` · `brain-resolve --request-id <id> [--action sent|handed_off|declined] [--message "<approved reply>"]` (action sent delivers the reply) ·
 `brain-outreach --conversation <id> --message "<opener>"` ·
 `brain-interrupt --conversation <id>` ·
 plus existing `read` / `send` / `recall` / `remember`.

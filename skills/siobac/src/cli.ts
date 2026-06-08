@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { promises as fs, constants as fsConstants } from 'node:fs'
-import { platform, arch, hostname } from 'node:os'
+import { platform, arch } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import {
@@ -36,258 +36,20 @@ import {
 import { parseInvite } from './invite.js'
 import { SKILL_NAME, SKILL_VERSION } from './version.js'
 
-// ── Output contract ────────────────────────────────────────────────────
-// Exactly one JSON object on stdout for success / on stderr for failure.
-// Same shape as ovoclaw-connect — agents already trained on that contract
-// can branch on `code` here without learning a new convention.
 
-// The installed skill folder on disk (parent of dist/), so update guidance can
-// name the exact location to replace. .../skills/siobac/dist/cli.js → .../skills/siobac
-function skillDir(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), '..')
-}
-
-// A concrete, copy-pasteable update instruction. The skill is a folder the
-// platform points at (git clone OR a copied/rsync'd dir), so we can't reliably
-// `git pull` in place — instead spell out: get the latest from the RIGHT repo,
-// then replace/re-point this exact folder. dist/ is prebuilt (no build step).
-function updateInstruction(repoUrl: string | null): string {
-  const repo = repoUrl || 'https://github.com/CammyStory/siobac-skills-playground'
-  return [
-    `To update: pull the latest from ${repo} (the skill is its \`skills/siobac/\` folder; \`dist/\` is prebuilt, no build step),`,
-    `then replace this installed copy at ${skillDir()} with that folder (or re-point this platform at it) and re-run.`,
-    `If you cloned the repo, \`git -C <your clone> pull\` then re-sync that folder here.`,
-  ].join(' ')
-}
-
-// Enrich a raw server update notice with the on-disk path + the how-to.
-function enrichNotice(upd: api.SkillUpdateNotice): api.SkillUpdateNotice {
-  return { ...upd, skill_path: skillDir(), how_to_update: updateInstruction(upd.update_url) }
-}
-
-// Attach a `skill_update` block when this run heard about a newer skill from
-// the server. SKILL.md tells the agent to relay it to the user.
-function withUpdateNotice<T extends object>(body: T): T & { skill_update?: api.SkillUpdateNotice } {
-  const upd = api.getSkillUpdateNotice()
-  return upd ? { ...body, skill_update: enrichNotice(upd) } : body
-}
-
-function ok(value: unknown): never {
-  const payload =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? withUpdateNotice(value as object)
-      : value
-  process.stdout.write(JSON.stringify(payload, null, 2) + '\n')
-  process.exit(0)
-}
-
-function fail(err: unknown, exitCode = 1): never {
-  let body: Record<string, unknown>
-  if (err instanceof CliError) {
-    body = { error: err.message, code: 'cli_error' }
-  } else if (err instanceof Error) {
-    const apiErr = err as api.ApiError
-    body = { error: err.message, code: apiErr.code ?? 'unknown' }
-    if (typeof apiErr.status === 'number') body.status = apiErr.status
-    if (apiErr.body !== undefined) body.details = apiErr.body
-  } else {
-    body = { error: String(err), code: 'unknown' }
-  }
-  process.stderr.write(JSON.stringify(withUpdateNotice(body), null, 2) + '\n')
-  process.exit(exitCode)
-}
-
-// Refresh once the access token has less than this much life left, so a
-// command never starts with a token about to expire mid-request.
-const TOKEN_REFRESH_SKEW_MS = 60_000
-
-async function requireAuth(): Promise<AuthState> {
-  const auth = await loadAuth()
-  if (!auth) {
-    throw api.makeApiError(
-      'not_authenticated',
-      'no auth.json found. Run `login` first to authenticate via device flow.',
-    )
-  }
-  // Token still has comfortable life left — use it as-is.
-  if (new Date(auth.expiresAt).getTime() - Date.now() > TOKEN_REFRESH_SKEW_MS) {
-    return auth
-  }
-  // Access token expired (or about to). Before forcing a full device-flow
-  // re-login, try to swap the stored refresh token (valid ~30 days, rotated
-  // each use) for a fresh access token — silent, no browser. Only when the
-  // refresh token itself is missing/expired/revoked do we ask for a re-login.
-  if (!auth.refreshToken) {
-    throw api.makeApiError(
-      'session_expired',
-      'access token expired and no refresh token is stored. Run `login` to re-authenticate.',
-    )
-  }
-  let token: api.DeviceTokenResponse
-  try {
-    token = await api.refreshAccessToken(auth.refreshToken)
-  } catch (e) {
-    const code = (e as api.ApiError).code
-    // 401 (invalid_grant) → the refresh token is expired/revoked: the 30-day
-    // window lapsed, the user logged out elsewhere, or a rotated token leaked.
-    // A fresh login is the only way forward. network_error / server_error /
-    // server_not_ready propagate unchanged so the caller can retry.
-    if (code === 'session_expired') {
-      throw api.makeApiError(
-        'session_expired',
-        'refresh token expired or revoked (idle 30+ days, logged out, or revoked). Run `login` to re-authenticate.',
-      )
-    }
-    throw e
-  }
-  // Persist the rotated pair so the next command keeps the chain alive. The
-  // server preserves the agent binding across refreshes; keep it (and the
-  // original login time) if the response omits anything.
-  const refreshed: AuthState = {
-    accessToken: token.access_token,
-    tokenType: token.token_type,
-    expiresAt: new Date(Date.now() + token.expires_in * 1000).toISOString(),
-    refreshToken: token.refresh_token ?? auth.refreshToken,
-    scope: token.scope ?? auth.scope,
-    ovoclawAccountId: token.account_id ?? auth.ovoclawAccountId,
-    agentId: token.agent_id ?? auth.agentId,
-    loggedInAt: auth.loggedInAt,
-  }
-  await saveAuth(refreshed)
-  return refreshed
-}
+import { cmdDoctor, cmdVerify, cmdSetup } from './diagnostics.js'
+import { cmdGuide, cmdHelp } from './guide.js'
+import {
+  cmdGoOnline, cmdBrainHandback, cmdBrainStatus, cmdOwnerChannel,
+  cmdBrainPending, cmdBrainResolve, cmdBrainOutreach, cmdBrainInterrupt,
+} from './brain.js'
+import {
+  ok, fail, withUpdateNotice, skillDir, updateInstruction,
+  requireAuth, requireBoundAgent, isConfirmed, needsConfirmation,
+  shareUrlFor, qrUrlFor, qrMarkdownFor, verifyShareResolves,
+} from './runtime.js'
 
 // ── Real commands ────────────────────────────────────────────────────
-
-interface DoctorCheck {
-  ok: boolean
-  value?: unknown
-  reason?: string
-  warning?: string
-  note?: string
-}
-
-async function cmdDoctor() {
-  const checks: Record<string, DoctorCheck> = {}
-
-  // Node version
-  const nodeV = process.versions.node
-  const major = Number.parseInt(nodeV.split('.')[0] ?? '0', 10)
-  checks.node_version =
-    major >= 18
-      ? { ok: true, value: `v${nodeV}` }
-      : { ok: false, value: `v${nodeV}`, reason: 'requires Node >= 18 for built-in fetch' }
-
-  checks.fetch = typeof fetch === 'function'
-    ? { ok: true }
-    : { ok: false, reason: 'global fetch unavailable; Node 18+ required' }
-
-  // Per-agent binding + state directory + auth file. The binding shows WHICH
-  // agent folder this working directory maps to — the key thing on a platform
-  // that runs more than one agent (each must resolve to its OWN folder).
-  const binding = await ensureAgentBinding(false)
-  const sourceNote: Record<AgentBinding['source'], string> = {
-    'env': 'OVOCLAW_AGENT_KEY env var (explicit).',
-    'local-file': `local binding file ${binding.binding_file}.`,
-    'default-shared': 'no binding — using the SHARED default folder. Fine for a single agent; if this platform runs more than one agent, run `login` here so each gets its own .ovoclaw.json (or set OVOCLAW_AGENT_KEY).',
-  }
-  checks.agent_binding = {
-    ok: true,
-    value: { key: binding.key || null, source: binding.source, binding_file: binding.binding_file },
-    warning: binding.source === 'default-shared' ? sourceNote['default-shared'] : undefined,
-    note: sourceNote[binding.source],
-  }
-  const authFile = authFilePath()
-  const writeCheck = await isAuthFileWriteable()
-  checks.state_dir = writeCheck.ok
-    ? { ok: true, value: stateDir() }
-    : { ok: false, value: stateDir(), reason: writeCheck.reason ?? 'unknown' }
-
-  try {
-    const st = await fs.stat(authFile)
-    const modeOctal = (st.mode & 0o777).toString(8).padStart(3, '0')
-    const tooPermissive = (st.mode & 0o077) !== 0
-    checks.auth_file = {
-      ok: !tooPermissive,
-      value: { path: authFile, mode: modeOctal, exists: true },
-      warning: tooPermissive
-        ? `auth.json mode ${modeOctal} is group/world readable; expected 600.`
-        : undefined,
-    }
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-      checks.auth_file = {
-        ok: true,
-        value: { path: authFile, exists: false },
-        warning: 'not logged in yet — run `login` to authenticate',
-      }
-    } else {
-      checks.auth_file = { ok: false, value: authFile, reason: (e as Error).message }
-    }
-  }
-
-  // API base + reachability
-  const apiBase = api.getApiBase()
-  try {
-    const u = new URL(apiBase)
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-      checks.api_base = { ok: false, value: apiBase, reason: `must be http or https; got ${u.protocol}` }
-    } else {
-      checks.api_base = { ok: true, value: apiBase }
-    }
-  } catch {
-    checks.api_base = { ok: false, value: apiBase, reason: 'invalid URL' }
-  }
-
-  if (checks.api_base.ok) {
-    const start = Date.now()
-    try {
-      const res = await fetch(`${apiBase}/health`, { method: 'GET' })
-      checks.api_reachable = {
-        ok: true,
-        value: { http_status: res.status, response_time_ms: Date.now() - start },
-      }
-    } catch (e) {
-      const cause = (e as Error & { cause?: { code?: string; message?: string } }).cause
-      const reason = cause?.code || cause?.message || (e as Error).message
-      checks.api_reachable = { ok: false, value: apiBase, reason: `network_error: ${reason}` }
-    }
-  } else {
-    checks.api_reachable = { ok: false, reason: 'skipped — api_base invalid' }
-  }
-
-  // Freshness: actively probe the server for the latest version (this is a fresh
-  // process, so nothing was captured yet). Report up-to-date vs stale + the exact
-  // way to update — so "am I current?" has one reliable answer here.
-  const vs = await api.getVersionStatus()
-  const skill_freshness = !vs.reachable
-    ? { up_to_date: null as boolean | null, your_version: vs.current, note: 'could not reach the server to check for updates (see api_reachable)' }
-    : vs.up_to_date
-      ? { up_to_date: true, your_version: vs.current, latest_version: vs.latest }
-      : {
-          up_to_date: false,
-          required: vs.required,
-          your_version: vs.current,
-          latest_version: vs.latest,
-          skill_path: skillDir(),
-          how_to_update: updateInstruction(vs.update_url),
-        }
-
-  // A stale skill isn't a hard doctor failure (commands still run), but a
-  // REQUIRED update is — surface it loudly.
-  const allOk = Object.values(checks).every((c) => c.ok) && !vs.required
-  const report = {
-    ok: allOk,
-    skill: { name: SKILL_NAME, version: SKILL_VERSION },
-    skill_freshness,
-    runtime: { node: process.versions.node, platform: platform(), arch: arch() },
-    checks,
-  }
-
-  if (allOk) ok(report)
-  process.stderr.write(JSON.stringify(report, null, 2) + '\n')
-  process.exit(1)
-}
 
 // Two-step login. `login` (initiate) requests a device code, stashes it, and
 // returns the approval URL immediately — it does NOT poll. `login --finish`,
@@ -454,8 +216,8 @@ async function cmdLoginFinish(_flags: Record<string, string | true>) {
     auto_go_online: true,
     next_step: prof
       ? (prof.is_new
-          ? 'YOU ARE ONLINE BY DEFAULT — once this agent is shared, the SERVER answers friends automatically the moment they message, and ESCALATES anything that commits the owner (meeting/money/scheduling/sensitive/off-directive/impersonation) for approval. There is NOTHING to arm: no scheduler, tick, heartbeat, cron, or long-poll — the server is the responder. Relay the ONLINE hub. This agent is NEW (no profile/directive), so nudge the owner to design it — (a) PUBLIC `set-profile --description "…"`, (b) PRIVATE `set-directive --content "…"` (the server replies in character using these) — and `share-self` for the QR/link. Pause auto-replies with `pause`; resume with `go-online`.'
-          : 'YOU ARE ONLINE BY DEFAULT — the SERVER answers friends automatically and ESCALATES anything that commits the owner (meeting/money/scheduling/sensitive/off-directive/impersonation) for approval. There is NOTHING to arm (no scheduler/tick/heartbeat/cron/long-poll) — the server is the responder. Relay the ONLINE hub showing the current `profile`/`directive`. The owner can update profile/rules (`set-profile`/`set-directive`), `share-self`, `pause` (manual), or `go-online` (resume). Escalations surface in the inbox (`owner-channel` / `brain-pending`) to approve or decline.')
+          ? 'YOU ARE ONLINE BY DEFAULT — once this agent is shared, the SERVER answers friends automatically the moment they message, and ESCALATES anything that commits the owner (meeting/money/scheduling/sensitive/off-directive/impersonation) for approval. Nothing to arm — server-driven (see references/brain.md). Relay the ONLINE hub. This agent is NEW (no profile/directive), so nudge the owner to design it — (a) PUBLIC `set-profile --description "…"`, (b) PRIVATE `set-directive --content "…"` (the server replies in character using these) — and `share-self` for the QR/link. Pause auto-replies with `pause`; resume with `go-online`.'
+          : 'YOU ARE ONLINE BY DEFAULT — the SERVER answers friends automatically and ESCALATES anything that commits the owner (meeting/money/scheduling/sensitive/off-directive/impersonation) for approval. Nothing to arm — server-driven (see references/brain.md). Relay the ONLINE hub showing the current `profile`/`directive`. The owner can update profile/rules (`set-profile`/`set-directive`), `share-self`, `pause` (manual), or `go-online` (resume). Escalations surface in the inbox (`owner-channel` / `brain-pending`) to approve or decline.')
       : 'You are online by default — the server auto-replies and escalates; nothing to arm. Relay the online hub.',
     tell_owner: prof
       ? (prof.is_new
@@ -488,55 +250,45 @@ function parseRequiresApproval(flags: Record<string, string | true>): boolean | 
   return !(v === 'false' || v === '0' || v === 'no')
 }
 
-// Every owner-side command acts as the ONE agent this login is bound to. The
-// agent_id is baked into the access token at login (the approval page's agent
-// picker), so the skill never takes an --agent-id — it can't act as any other
-// agent, and the server enforces that too. A token from before agent-scoping
-// (no agentId) is treated as stale → re-login.
-async function requireBoundAgent(): Promise<{ auth: AuthState; agentId: string }> {
-  const auth = await requireAuth()
-  if (!auth.agentId) {
-    throw api.makeApiError(
-      'not_authenticated',
-      'this login is not bound to an agent (old token). Run `login` again and pick the agent to authorize.',
-    )
-  }
-  return { auth, agentId: auth.agentId }
-}
 
-function shareUrlFor(slug: string): string {
-  // The legacy /external/share/:slug landing page is served on the same host
-  // the owner API lives on, so this resolves without needing the protocol
-  // subdomain. The server's list-shares builds the same shape host-aware.
-  return `${api.getApiBase()}/external/share/${encodeURIComponent(slug)}`
-}
-
-// A scannable PNG QR of the share landing URL — surface this so the agent can
-// SHOW a QR (not just a link) to its owner after sharing.
-function qrUrlFor(slug: string): string {
-  return `${shareUrlFor(slug)}/qr.png`
-}
-
-// A ready-to-render inline image embed for the QR. On image-capable platforms
-// the agent drops this straight into its reply so the user sees a scannable QR
-// image, not a bare URL. SKILL.md tells the agent to prefer this over the link.
-function qrMarkdownFor(slug: string): string {
-  return `![Scan to reach me on Siobac](${qrUrlFor(slug)})`
-}
 
 async function cmdShareSelf(flags: Record<string, string | true>) {
   optionalString(flags, 'description') // accepted for forward-compat; not used by the invite endpoint
-  const requiresApproval = parseRequiresApproval(flags)
-  const { auth, agentId } = await requireBoundAgent()
-  let invite = await api.createShare(auth.accessToken, agentId, { requires_approval: requiresApproval })
-  // createShare is idempotent and IGNORES requires_approval on an EXISTING invite.
-  // So if the owner asked for a specific setting and it differs, apply it IN PLACE
-  // (PATCH) — keeps the SAME slug/QR. (Changing approval must never rotate the link.)
-  if (requiresApproval !== undefined && invite.requires_approval !== requiresApproval) {
-    invite = await api.updateShareApproval(auth.accessToken, agentId, requiresApproval)
+  // Approval policy. `explicit` is the owner's EXPLICIT choice (undefined if no
+  // flag passed). NEW shares default to AUTO-ACCEPT (no approval) so the first
+  // connection just works; the owner can require approval anytime with
+  // `set-approval --on`. An existing invite's setting is never changed here
+  // unless the owner explicitly chose one.
+  const explicit = parseRequiresApproval(flags)
+  const createApproval = explicit ?? false // default: auto-accept
+  // CONSENT GATE — publishing the agent is outward-facing; confirm before it fires.
+  if (!isConfirmed(flags)) {
+    const policy = createApproval === false
+      ? 'AUTO-ACCEPT — anyone with the link connects without your review (default; turn on with `set-approval --on`)'
+      : 'approval required — you approve each new connection'
+    needsConfirmation(
+      'share-self',
+      { will: 'Publish this agent and produce a shareable QR/link anyone you give it to can use to reach you.', approval_policy: policy },
+      `I'll publish you on Siobac and make a QR/link people can use to reach you (${createApproval === false ? 'auto-accepting new connections — you can switch to approval-required anytime with set-approval --on' : 'with your approval for each new connection'}). Want me to go ahead?`,
+      'share-self --confirmed (add --requires-approval if you want to approve each connection instead)',
+    )
   }
+  const { auth, agentId } = await requireBoundAgent()
+  let invite = await api.createShare(auth.accessToken, agentId, { requires_approval: createApproval })
+  // createShare is idempotent and IGNORES requires_approval on an EXISTING invite.
+  // Only change an existing invite's setting when the owner EXPLICITLY chose one
+  // (PATCH in place — keeps the SAME slug/QR; changing approval never rotates the link).
+  if (explicit !== undefined && invite.requires_approval !== explicit) {
+    invite = await api.updateShareApproval(auth.accessToken, agentId, explicit)
+  }
+  // VERIFY before claiming success: round-trip the new slug through the public
+  // manifest so we KNOW the QR/link actually resolves to this agent before
+  // handing it to the owner. A created-but-unresolvable share is exactly the
+  // "looks done but isn't" failure to catch here, not after the owner shares it.
+  const verified = await verifyShareResolves(invite.slug)
+  const linkWorks = verified.resolves && verified.points_back
   ok({
-    status: 'shared',
+    status: linkWorks ? 'shared' : 'shared_unverified',
     agent_id: agentId,
     invite: {
       id: invite.id,
@@ -547,9 +299,17 @@ async function cmdShareSelf(flags: Record<string, string | true>) {
     share_url: shareUrlFor(invite.slug),
     qr_url: qrUrlFor(invite.slug),
     qr_markdown: qrMarkdownFor(invite.slug),
-    note: 'DISPLAY THE QR INLINE: render it as an image so the user sees a scannable QR, not a link — drop the ready-made `qr_markdown` straight into your reply (it is `![](qr_url)`). Also give `share_url` as a copyable link. Only if your platform cannot render images, fall back to showing `qr_url` as a plain link. (createInvite is idempotent — an already-shared agent returns its existing invite.)',
-    next_step: 'If you have not already, help the owner DESIGN their agent so others understand who they are: set the private DIRECTIVE (`set-directive --content "…"` — the rules/purpose for how you reply on their behalf) and confirm the PUBLIC PROFILE (name/description) is accurate. Then, when a friend connects, use `recall` before replying and `remember` after (see "Step 6 — Talk in character" in your language guide references/guide-en.md or references/guide-cn.md, or run `guide --step talk_in_character`).',
-    tell_owner: "Here's your Siobac QR / link — anyone you give it to can reach me. [render the QR image inline] Want new connections to need your approval first, or auto-accept them?",
+    // Programmatic proof the link resolves (not just that create returned 200).
+    verified: { share_resolves: verified.resolves, points_back: verified.points_back, reason: verified.reason },
+    note: linkWorks
+      ? 'DISPLAY THE QR INLINE: render it as an image so the user sees a scannable QR, not a link — drop the ready-made `qr_markdown` straight into your reply (it is `![](qr_url)`). Also give `share_url` as a copyable link. Only if your platform cannot render images, fall back to showing `qr_url` as a plain link. (createInvite is idempotent — an already-shared agent returns its existing invite.) The link was VERIFIED to resolve to this agent.'
+      : `CAUTION: the share was created but did NOT verify — the link did not resolve back to this agent (${verified.reason ?? 'unknown'}). Do NOT tell the owner it is ready. Re-run \`share-self\`, check connectivity with \`doctor\`, or run \`verify\` for detail before handing out the QR.`,
+    next_step: linkWorks
+      ? 'If you have not already, help the owner DESIGN their agent so others understand who they are: set the private DIRECTIVE (`set-directive --content "…"` — the rules/purpose for how you reply on their behalf) and confirm the PUBLIC PROFILE (name/description) is accurate. Then, when a friend connects, use `recall` before replying and `remember` after (see "Step 6 — Talk in character" in your language guide references/guide-en.md or references/guide-cn.md, or run `guide --step serve_incoming`).'
+      : 'Share verification FAILED — resolve that first. Run `verify` for the full check, or `doctor` for connectivity, then `share-self` again. Do not surface the QR as working until `verified.share_resolves` and `verified.points_back` are both true.',
+    tell_owner: linkWorks
+      ? "Here's your Siobac QR / link — anyone you give it to can reach me. [render the QR image inline] Want new connections to need your approval first, or auto-accept them?"
+      : "I created your share but couldn't confirm the link works yet — let me re-check before you hand it out, so no one scans a dead QR.",
   })
 }
 
@@ -656,17 +416,43 @@ async function actOnConnectionCmd(
     // the read/send endpoints reject with 404). Hand the right handle back as
     // `conversation` and steer the agent so it doesn't reach for the conv_ id.
     out.conversation = connectionId
+    // VERIFY the approval actually took: re-read the connection and assert it is
+    // now `active`, rather than trust the accept call's return. Best-effort — a
+    // transient list failure shouldn't undo a real approval, just leave it
+    // unverified so the agent re-checks instead of over-claiming.
+    let active: boolean | null = null
+    try {
+      const conns = await api.listConnections(auth.accessToken, agentId)
+      const c = conns.find((x) => x.id === connectionId)
+      active = c ? c.status === 'active' : null
+    } catch { /* leave active=null → unverified */ }
+    out.verified = { active }
     out.next_step =
       `Approved — you can talk on this conversation now. Read it with \`read --conversation ${connectionId}\` ` +
       `and reply with \`send --conversation ${connectionId} --message "…"\`. Use THIS id (the connection id) as the ` +
       `conversation handle — do NOT use the conv_… id in result.conversation_id (read/send reject it). ` +
-      `When the agent is online, the brain handles this conversation on each \`brain-tick\` (RESPOND/ESCALATE) — just watch with \`check\`.`
-    out.tell_owner = "They're connected — I can read and reply to their messages now."
+      (active === false
+        ? 'NOTE: the connection did NOT read back as active yet — re-check with `list-connections` before telling the owner it is live. '
+        : '') +
+      `When the agent is online, the SERVER handles this conversation automatically (RESPOND/ESCALATE) — just watch with \`check\`.`
+    out.tell_owner = active === false
+      ? "I approved them, but I'm double-checking the connection is fully live before I rely on it."
+      : "They're connected — I can read and reply to their messages now."
   }
   ok(out)
 }
 
 async function cmdAcceptPending(flags: Record<string, string | true>) {
+  // CONSENT GATE — approving admits someone to talk to the agent; confirm first.
+  if (!isConfirmed(flags)) {
+    const requestId = requireString(flags, 'request-id', 'approve')
+    needsConfirmation(
+      'approve',
+      { request_id: requestId, will: 'Admit this requester — they can then exchange messages with your agent.' },
+      "Approve this connection request so they can talk to me? (Run `requests` first if you want to review who's asking.)",
+      `approve --request-id ${requestId} --confirmed`,
+    )
+  }
   return actOnConnectionCmd(flags, 'accept-pending', 'request-id', 'accept', 'accepted')
 }
 async function cmdRejectPending(flags: Record<string, string | true>) {
@@ -717,11 +503,11 @@ async function cmdRecall(flags: Record<string, string | true>) {
       ok({
         status: 'ok',
         conversation: connectionId,
-        mode: 'guest',
+        mode: 'logged_out',
         directive: '',
         profile: null,
         friend_memory: [],
-        note: 'Guest conversation — no login, so no directive or memory. Just reply normally.',
+        note: 'Not logged in — no agent directive/profile to load. Log in (`login`) to reply as your agent; Siobac connections are login-only.',
       })
     }
     return
@@ -738,8 +524,8 @@ async function cmdRecall(flags: Record<string, string | true>) {
     // PUBLIC card others see — safe to reference.
     profile: ctx.profile,
     // Your memory of THIS friend (summary first). disclosure 'private' = act on,
-    // never say; 'friend_shared' = ok to reference WITH this friend. Empty for
-    // guest connections (guests carry no memory).
+    // never say; 'friend_shared' = ok to reference WITH this friend. Empty until
+    // there's memory recorded for this friend.
     friend_memory: ctx.friend_memory,
   })
 }
@@ -790,195 +576,6 @@ async function cmdRemember(flags: Record<string, string | true>) {
   if (deltas.length === 0) throw new CliError('nothing to remember — pass --deltas <json> and/or --summary "<text>".')
   const result = await api.submitMemory(auth.accessToken, agentId, connectionId, deltas)
   ok({ status: 'remembered', agent_id: agentId, connection_id: connectionId, ...result })
-}
-
-// ── Auto-Response: let the agent talk on the owner's behalf ─────────────
-// Hand off a PURPOSE; the server composes + sends each reply in character until
-// the goal is met or the owner stops. Works on EITHER side: an INBOUND
-// connection id (someone who connected to YOU — owner side) OR an OUTBOUND s_…
-// session (a share you connected to — connector side, token-authed).
-async function outboundSessionOrThrow(handle: string) {
-  const sess = await getSession(handle)
-  if (!sess) throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`)
-  return sess
-}
-
-async function cmdAutoStart(flags: Record<string, string | true>) {
-  const handle = requireString(flags, 'conversation', 'auto-start')
-  const purpose = requireString(flags, 'purpose', 'auto-start')
-  const maxTurns = optionalString(flags, 'max-turns')
-  const mt = maxTurns !== undefined ? Number(maxTurns) : undefined
-  // --draft = oversight mode: the agent DRAFTS each reply and waits for approval.
-  const draft = flags.draft === true || flags.draft === 'true'
-  const mode = draft ? 'draft' : 'auto'
-
-  // CONNECTOR side: an OUTBOUND conversation (a share you reached out to). Drive
-  // auto via its session token — same capability as the share/owner side.
-  if (isActiveHandle(handle)) {
-    const sess = await outboundSessionOrThrow(handle)
-    const s = await api.autoStartOut(sess.host, sess.token, purpose, mt, mode)
-    ok({
-      status: 'auto_started', conversation: handle, side: 'connector', mode,
-      auto: { status: s.status, mode: s.mode, turn_count: s.turn_count, max_turns: s.max_turns },
-      warning: s.warning,
-      note: 'Auto-response is ON for this conversation. Your agent replies on its own toward the purpose (it pauses every few turns to check in) — you do NOT run `send`.',
-      next_step: `Watch with \`auto-status --conversation ${handle}\` / \`read --conversation ${handle}\`; continue or steer at a checkpoint with \`auto-resume --conversation ${handle} [--purpose "…"]\`; stop with \`auto-stop --conversation ${handle}\`.`,
-      tell_owner: "I'll keep this conversation going on your behalf toward the goal and report back. Tell me to stop anytime.",
-    })
-    return
-  }
-
-  // OWNER/INBOUND side (someone who connected to you).
-  const { auth, agentId } = await requireBoundAgent()
-  const s = await api.autoStart(auth.accessToken, agentId, handle, purpose, mt, mode)
-  ok({
-    status: 'auto_started',
-    conversation: handle,
-    mode,
-    auto: { status: s.status, mode: s.mode, purpose: s.purpose, turn_count: s.turn_count, max_turns: s.max_turns },
-    warning: s.warning,
-    note: draft
-      ? 'Draft (oversight) mode is ON for this conversation. When this person messages, your agent DRAFTS a reply (in character, toward the purpose) and HOLDS it — nothing is sent until you approve it. Pending drafts show up on every `check`; approve with `auto-approve` (optionally `--edit`).'
-      : 'Auto-response is ON for this conversation. When this person messages, your agent composes + sends a reply on its own (in character, toward the purpose) — you do NOT run `send`. It stops automatically when the goal is met or after the turn cap, and the outcome is reported back to you on your next `check`.',
-    next_step: draft
-      ? `Watch for drafts with \`check\` or \`auto-status --conversation ${handle}\`, then \`auto-approve --conversation ${handle} [--edit "<your version>"]\` to send each one. Switch to full auto by re-running \`auto-start\` without \`--draft\`. Stop with \`auto-stop --conversation ${handle}\`.`
-      : `Watch it with \`auto-status --conversation ${handle}\` and read the exchange with \`read --conversation ${handle}\`. To STEER it mid-conversation, re-run \`auto-start\` with a new \`--purpose\`. To take over manually, \`auto-stop --conversation ${handle}\` then \`send\`.`,
-    tell_owner: (s.warning ? s.warning + ' ' : '') + (draft
-      ? "I'll draft each reply on your behalf toward the goal and show it to you to approve (or tweak) before it sends — nothing goes out without your OK."
-      : "I'll handle this conversation automatically and reply on your behalf to get the result, and report back what happens. Tell me to stop anytime and I'll hand it back to you."),
-  })
-}
-
-async function cmdAutoApprove(flags: Record<string, string | true>) {
-  const connectionId = requireString(flags, 'conversation', 'auto-approve')
-  const edited = optionalString(flags, 'edit')
-  const { auth, agentId } = await requireBoundAgent()
-  const s = await api.autoApprove(auth.accessToken, agentId, connectionId, edited)
-  if (s.status === 'none') {
-    ok({ status: 'not_running', conversation: connectionId, note: 'No auto-response session is running on this conversation — nothing to approve.' })
-    return
-  }
-  if (s.status === 'no_draft') {
-    ok({ status: 'no_draft', conversation: connectionId, note: 'No reply is waiting for approval right now. A draft appears after this person messages; check again then.' })
-    return
-  }
-  const finished = s.status !== 'running'
-  ok({
-    status: 'approved',
-    conversation: connectionId,
-    edited: edited !== undefined,
-    auto: { status: s.status, mode: s.mode, turn_count: s.turn_count, max_turns: s.max_turns, result_summary: s.result_summary },
-    note: finished
-      ? `Reply sent — and this wrapped up the conversation (${s.reason || s.status}).${s.result_summary ? ` Result: ${s.result_summary}` : ''}`
-      : 'Reply sent. Draft mode is still on — when they reply, your agent will draft the next one for you to approve.',
-    tell_owner: finished
-      ? `Sent.${s.result_summary ? ` ${s.result_summary}` : ' That wrapped things up.'}`
-      : 'Sent that one for you. I\'ll draft the next reply when they respond.',
-  })
-}
-
-async function cmdAutoStop(flags: Record<string, string | true>) {
-  const connectionId = requireString(flags, 'conversation', 'auto-stop')
-  let s: api.AutoSession
-  if (isActiveHandle(connectionId)) {
-    const sess = await outboundSessionOrThrow(connectionId)
-    s = await api.autoStopOut(sess.host, sess.token)
-  } else {
-    const { auth, agentId } = await requireBoundAgent()
-    s = await api.autoStop(auth.accessToken, agentId, connectionId)
-  }
-  const wasRunning = s.status !== 'none'
-  ok({
-    status: wasRunning ? 'auto_stopped' : 'not_running',
-    conversation: connectionId,
-    auto: { status: s.status, turn_count: s.turn_count, result_summary: s.result_summary, reason: s.reason },
-    note: wasRunning
-      ? 'Auto-response stopped. You are back to manual — reply with `send` from here.'
-      : 'Auto-response was not running on this conversation.',
-    tell_owner: wasRunning ? "Stopped — I've handed this conversation back to you. Want me to draft the next reply?" : undefined,
-  })
-}
-
-async function cmdAutoStatus(flags: Record<string, string | true>) {
-  const connectionId = requireString(flags, 'conversation', 'auto-status')
-  let s: api.AutoSession
-  if (isActiveHandle(connectionId)) {
-    const sess = await outboundSessionOrThrow(connectionId)
-    s = await api.autoStatusOut(sess.host, sess.token)
-  } else {
-    const { auth, agentId } = await requireBoundAgent()
-    s = await api.autoStatus(auth.accessToken, agentId, connectionId)
-  }
-  const hasDraft = s.status === 'running' && s.mode === 'draft' && !!s.pending_draft
-  const note =
-    s.status === 'running'
-      ? hasDraft
-        ? `Draft mode: a reply is waiting for your approval — "${s.pending_draft}". Approve with \`auto-approve --conversation ${connectionId} [--edit "<your version>"]\`.`
-        : s.mode === 'draft'
-          ? `Draft mode is on (${s.turn_count ?? 0} sent so far). No reply is pending right now — one will be drafted when this person next messages.`
-          : `Auto-response is running (${s.turn_count ?? 0} repl${(s.turn_count ?? 0) === 1 ? 'y' : 'ies'} sent so far). Read the exchange with \`read --conversation ${connectionId}\`.`
-      : s.status === 'none'
-        ? 'No auto-response has been started on this conversation.'
-        : `Auto-response ${s.status}${s.reason ? ` (${s.reason})` : ''}.${s.result_summary ? ` Result: ${s.result_summary}` : ''}`
-  ok({ status: 'ok', conversation: connectionId, auto: s, note })
-}
-
-// Per-agent auto-converse opt-in. No flag → show state; --on/--off → toggle.
-// When ON, every connection this agent is in auto-responds by default (zero
-// config), and if the other end is also on, the two agents converse on their own.
-async function cmdAutoConverse(flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const on = flags.on === true || flags.on === 'true'
-  const off = flags.off === true || flags.off === 'true'
-  if (on && off) throw new CliError('Pass either --on or --off, not both.')
-  if (!on && !off) {
-    const s = await api.getAutoConverse(auth.accessToken, agentId)
-    ok({
-      status: 'ok', agent_id: agentId, auto_converse: s.enabled,
-      note: s.enabled
-        ? 'Auto-converse is ON: I reply automatically on every connection (and can talk agent-to-agent). Watch with `check`; redirect with `auto-resume --purpose`. Turn off with `auto-converse --off`.'
-        : 'Auto-converse is OFF: connections are manual — you approve each reply. Turn on with `auto-converse --on`.',
-    })
-    return
-  }
-  const s = await api.setAutoConverse(auth.accessToken, agentId, on)
-  ok({
-    status: 'auto_converse_updated', agent_id: agentId, auto_converse: s.enabled,
-    note: s.enabled
-      ? 'Auto-converse is now ON. From now on, when someone is connected I reply automatically toward a natural conversation — you do NOT run `send` per message. I pause every few turns to check in, and you can steer or stop anytime.'
-      : 'Auto-converse is now OFF. Back to manual — I surface messages via `check` and you decide each reply.',
-    tell_owner: s.enabled
-      ? "I'll now reply automatically to people who connect (and chat with their agents) — I'll check in every few turns and you can jump in to steer or stop me anytime."
-      : "Auto-replies are off — I'll show you incoming messages and let you decide each reply.",
-  })
-}
-
-// Continue a checkpoint-paused auto-conversation (optionally steering it).
-async function cmdAutoResume(flags: Record<string, string | true>) {
-  const connectionId = requireString(flags, 'conversation', 'auto-resume')
-  const purpose = optionalString(flags, 'purpose')
-  let s: api.AutoSession
-  if (isActiveHandle(connectionId)) {
-    const sess = await outboundSessionOrThrow(connectionId)
-    s = await api.autoResumeOut(sess.host, sess.token, purpose)
-  } else {
-    const { auth, agentId } = await requireBoundAgent()
-    s = await api.autoResume(auth.accessToken, agentId, connectionId, purpose)
-  }
-  if (s.status === 'none') {
-    ok({ status: 'nothing_paused', conversation: connectionId, note: 'This conversation is not paused at a checkpoint — nothing to resume.' })
-    return
-  }
-  ok({
-    status: 'resumed',
-    conversation: connectionId,
-    steered: purpose !== undefined && purpose !== '',
-    auto: { status: s.status, turn_count: s.turn_count },
-    note: purpose
-      ? `Resumed and steered toward: "${purpose}". I'll keep going and pause again in a few turns.`
-      : 'Resumed — I\'ll continue the conversation and pause again in a few turns to check in.',
-    tell_owner: purpose ? `Got it — steering the conversation toward ${purpose}.` : 'Picking the conversation back up.',
-  })
 }
 
 async function cmdGetDirective(_flags: Record<string, string | true>) {
@@ -1050,9 +647,8 @@ async function persistSession(res: api.ConnectResponse, slug: string, host: stri
   // already have locally (the SAME registered friendship — reconnect, re-login,
   // or a token re-mint all return the same conversation_id), REUSE that handle
   // instead of minting a new one. This keeps "same agent → same conversation"
-  // and preserves lastSeq so history isn't re-read as new. A guest reconnect
-  // gets a fresh conversation_id from the server, so it correctly gets a new
-  // handle. Secondary fallback: an existing session on the same invite slug.
+  // and preserves lastSeq so history isn't re-read as new. Secondary fallback:
+  // an existing session on the same invite slug.
   const prior = res.conversation_id
     ? (await listSessions()).find((s) => s.conversationId === res.conversation_id)
     : undefined
@@ -1081,7 +677,7 @@ async function cmdInspectInvite(flags: Record<string, string | true>) {
   ok({
     status: 'ok', host, slug, agent: m.agent,
     requires_approval: m.requires_approval ?? false,
-    your_login_state: auth?.agentId ? 'logged_in' : 'guest',
+    your_login_state: auth?.agentId ? 'logged_in' : 'logged_out',
   })
 }
 
@@ -1091,34 +687,29 @@ async function cmdConnect(flags: Record<string, string | true>) {
   const { slug, host } = parseInvite(invite)
   const auth = await loadAuth()
   const loggedIn = !!(auth && auth.agentId)
-  const guest = flags['guest'] === true || flags['guest'] === 'true' || flags['guest'] === ''
-  const existing = (await listSessions()).find((s) => s.slug === slug)
 
-  // Login-choice gate (per the owner's rule): logged-in → use the agent;
-  // logged-out + no --guest + no prior session → ASK login-or-guest.
-  if (!loggedIn && !guest && !existing) {
+  // LOGIN-ONLY: every Siobac connection is a registered, account-anchored
+  // friendship — both sides log in and connect as themselves. There is no guest
+  // mode. If the owner isn't logged in, they must log in (or sign up) first.
+  if (!loggedIn) {
     ok({
-      status: 'login_choice_required',
-      message: 'You are not logged in. Ask the owner: LOG IN (or SIGN UP) so this agent reaches out as ITSELF (a saved, account-anchored friendship), OR connect once as an anonymous GUEST. No Siobac account yet is fine — `login` opens a page where the owner can sign IN or create a NEW account (and an agent) on the spot; do NOT tell them to sign up anywhere else.',
-      options: {
-        login: 'run `login` — on that page the owner logs in OR signs up (a new account creates an agent automatically); then `connect` again → registered friendship. (Sign-up may ask for an invite code.)',
-        guest: 're-run `connect … --guest` → one-off anonymous connection, no account',
-      },
-      tell_owner: "Do you want me to reach out as YOU — a saved connection that remembers this person? That just needs a quick Siobac login; no account yet is fine, you can sign up on the same page. Or I can connect as an anonymous guest for a one-off chat.",
+      status: 'login_required',
+      message: 'You must log in to connect — Siobac connections are between two logged-in agents (no guest mode). `login` opens a page where the owner signs IN, or creates a NEW account (and an agent) on the spot; then run `connect` again.',
+      next_step: 'Run `login` (two-step: `login`, then `login --finish` after the owner approves on the page). Then re-run this `connect`.',
+      tell_owner: "To reach out you'll need a quick Siobac login first — no account yet is fine, you can sign up on the same page. Want to log in now?",
     })
   }
 
-  const bearer = loggedIn ? auth!.accessToken : undefined
   const res = await api.connectToInvite(host, slug, {
     your_agent_name: optionalString(flags, 'agent-name'),
     your_owner_name: optionalString(flags, 'owner-name'),
     introduction,
     purpose_hint: optionalString(flags, 'purpose'),
-  }, bearer)
+  }, auth!.accessToken)
 
   if (res.status === 'active' || res.status === 'reauthorized' || res.status === 'already_connected') {
     const handle = await persistSession(res, slug, host)
-    ok({ status: res.status, conversation: handle, peer_name: res.peer_name ?? null, mode: bearer ? 'registered' : 'guest', token_expires_at: res.token_expires_at, tell_owner: `Connected${res.peer_name ? ' to ' + res.peer_name : ''}. Want me to send a first message — and what should I say?` })
+    ok({ status: res.status, conversation: handle, peer_name: res.peer_name ?? null, mode: 'registered', token_expires_at: res.token_expires_at, tell_owner: `Connected${res.peer_name ? ' to ' + res.peer_name : ''}. Want me to send a first message — and what should I say?` })
   }
   if (res.status === 'awaiting_approval') {
     ok({ status: 'awaiting_approval', request_id: res.request_id, invite, hint: 'Poll `check-approval --invite <same> --request-id <id>`; when it turns active you get a `conversation` handle.' })
@@ -1158,8 +749,40 @@ async function cmdRead(flags: Record<string, string | true>) {
   if (isActiveHandle(handle)) {
     const sess = await getSession(handle)
     if (!sess) throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`)
-    const res = await api.pollConnectionReplies(sess.host, sess.token, 0, 0, /* full */ true)
-    ok({ status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null, messages: res.messages, last_seq: res.last_seq, note: 'Full conversation, both directions — each message is tagged `direction` (outbound = your own).' })
+    const sinceFlag = optionalString(flags, 'since')
+    if (sinceFlag !== undefined) {
+      // Explicit forward page from <since> (the server's /poll returns one capped
+      // window of messages with seq > since, oldest-first).
+      const res = await api.pollConnectionReplies(sess.host, sess.token, Math.max(0, Number(sinceFlag) || 0), 0, /* full */ true)
+      const earliest = res.messages[0]?.seq
+      ok({
+        status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null,
+        messages: res.messages, last_seq: res.last_seq, has_more_before: typeof earliest === 'number' && earliest > 1,
+        note: 'Forward page from `--since`. Both directions (outbound = your own). Page again with the returned `last_seq`.',
+      })
+    }
+    // Default: the server caps each /poll window and reports `last_seq` as the
+    // window's max (NOT the conversation's), so a single poll from 0 returns the
+    // OLDEST window. Page forward to the end, then show the most RECENT window so
+    // `read` shows recent messages on a long conversation.
+    const bySeq = new Map<number, api.ReplyMessage>()
+    let cursor = 0
+    for (let guard = 0; guard < 20; guard++) {
+      const r = await api.pollConnectionReplies(sess.host, sess.token, cursor, 0, true)
+      if (!r.messages.length) break
+      for (const m of r.messages) bySeq.set(m.seq, m)
+      if (r.last_seq <= cursor) break
+      cursor = r.last_seq
+    }
+    const all = [...bySeq.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+    const recent = all.slice(-50)
+    const earliest = recent[0]?.seq
+    ok({
+      status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null,
+      messages: recent, last_seq: all.length ? all[all.length - 1].seq : 0,
+      has_more_before: typeof earliest === 'number' && earliest > 1,
+      note: 'Both directions (outbound = your own), most recent window. If `has_more_before`, older messages exist — page with `--since <seq>`.',
+    })
   }
   const { auth, agentId } = await requireBoundAgent()
   const since = optionalString(flags, 'since')
@@ -1170,19 +793,56 @@ async function cmdRead(flags: Record<string, string | true>) {
 async function cmdSend(flags: Record<string, string | true>) {
   const handle = requireString(flags, 'conversation', 'send')
   const message = requireString(flags, 'message', 'send')
+  // CONSENT GATE — a message goes out under the owner's identity; confirm the
+  // exact text first. (The server's own autonomous replies don't pass through
+  // here — this gate is for the manual/owner-driven send path.)
+  if (!isConfirmed(flags)) {
+    needsConfirmation(
+      'send',
+      { conversation: handle, message },
+      `Send this to ${handle}: "${message}" — okay, or want to change it?`,
+      `send --conversation ${handle} --message "<the confirmed text>" --confirmed`,
+    )
+  }
   if (isActiveHandle(handle)) {
     const sess = await getSession(handle)
     if (!sess) throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`)
     const res = await api.sendToConnection(sess.host, sess.token, message)
-    ok({ status: 'sent', conversation: handle, direction: 'outbound', message_id: res.message?.id, seq: res.message?.seq, reply_status: res.reply_status })
+    // Assert the server actually persisted it (assigned a seq + id) before
+    // reporting "sent" — a 200 with no seq means it did NOT land.
+    const persisted = typeof res.message?.seq === 'number' && !!res.message?.id
+    ok({
+      status: persisted ? 'sent' : 'send_unconfirmed',
+      conversation: handle, direction: 'outbound',
+      message_id: res.message?.id, seq: res.message?.seq, reply_status: res.reply_status,
+      verified: { persisted, seq: res.message?.seq ?? null },
+      note: persisted ? undefined : 'The send returned without a sequence number — it may NOT have been delivered. Do not tell the owner it sent; re-`read` the conversation to confirm before retrying.',
+    })
   }
   const { auth, agentId } = await requireBoundAgent()
   const res = await api.postReply(auth.accessToken, agentId, handle, message)
+  // The server HOLDS a reply that looks like it would disclose sensitive info — it
+  // escalates to the owner instead of sending. Surface that clearly (NOT as a fail).
+  if ((res as { status?: string }).status === 'blocked') {
+    const kind = (res as { kind?: string }).kind
+    ok({
+      status: 'held_for_review', conversation: handle, direction: 'inbound', kind,
+      next_step: `This message looked like it would share ${kind ?? 'sensitive info'}, so the server HELD it and escalated it to the owner — it was NOT sent. Show the owner via \`brain-pending\`; if they approve, deliver it with \`brain-resolve --action sent --message "<approved text>"\` (do not retry \`send\`).`,
+      tell_owner: `I held that message because it looks like it shares ${kind ?? 'private info'} — want me to send it as-is, edit it, or skip it?`,
+    })
+  }
+  // Assert persistence: the server returns the assigned seq + message_id only
+  // when the reply actually landed in the conversation.
+  const persisted = typeof res.seq === 'number' && !!res.message_id
   ok({
-    status: 'sent', conversation: handle, direction: 'inbound', ...res,
+    status: persisted ? 'sent' : 'send_unconfirmed',
+    conversation: handle, direction: 'inbound', ...res,
+    verified: { persisted, seq: res.seq ?? null },
     // Manual send (owner paused/offline, or hand-writing this one). Autonomous
-    // replying is the brain's job when online (brain-tick), not a per-send toggle.
-    next_step: `Sent. Persist anything worth keeping with \`remember --conversation ${handle}\`. (Autonomous follow-up is the brain's job: when online it handles this thread on each \`brain-tick\` — you don't turn anything on here.)`,
+    // replying is the brain's job when online, not a per-send toggle.
+    next_step: persisted
+      ? `Sent (server confirmed seq ${res.seq}). Persist anything worth keeping with \`remember --conversation ${handle}\`. (Autonomous follow-up is the brain's job — you don't turn anything on here.)`
+      : `The send did NOT come back with a sequence number — it may not have landed. Do NOT tell the owner it sent; \`read --conversation ${handle}\` to confirm, then retry if missing.`,
   })
 }
 
@@ -1192,48 +852,8 @@ async function cmdCheck(_flags: Record<string, string | true>) {
   if (auth && auth.agentId) {
     const inbox = await api.fetchInbox(auth.accessToken)
     result.inbound = { pending_requests: inbox.pending_requests, threads: inbox.threads, unread_count: inbox.new_messages.length }
-    // Report-back (#1): auto-conversations that FINISHED on their own while the
-    // owner was away — surface the outcome once so the agent can relay it.
-    try {
-      const updates = await api.autoUpdates(auth.accessToken, auth.agentId)
-      if (updates.length) {
-        result.auto_updates = updates
-        const label = (u: api.AutoUpdate) =>
-          u.status === 'failed' ? 'hit an error'
-          : u.status === 'stalled' ? 'timed out waiting'
-          : u.reason === 'max_turns_reached' ? 'reached the reply limit (not fully resolved)'
-          : 'wrapped up'
-        result.auto_updates_note =
-          `${updates.length} auto-conversation${updates.length === 1 ? '' : 's'} finished — tell the owner the outcome: ` +
-          updates.map(u => `(${label(u)}) ${u.result_summary || u.reason || ''}`).join(' · ')
-      }
-    } catch { /* report-back is best-effort; never sink check over it */ }
-    // Draft (oversight) mode (#5): replies waiting for the owner's approval.
-    // Recurring (unlike auto_updates) — surface every check until handled.
-    try {
-      const drafts = await api.autoDrafts(auth.accessToken, auth.agentId)
-      if (drafts.length) {
-        result.pending_drafts = drafts
-        result.pending_drafts_note =
-          `${drafts.length} drafted repl${drafts.length === 1 ? 'y is' : 'ies are'} waiting for your approval — show each to the owner; approve with ` +
-          `\`auto-approve --conversation <id>\` (or \`--edit "<your version>"\`): ` +
-          drafts.map(d => `[${d.connection_id}] "${d.draft}"`).join(' · ')
-      }
-    } catch { /* best-effort; never sink check */ }
-    // Auto-converse checkpoints (v2): conversations paused after a few auto turns,
-    // waiting for the owner to continue / steer / wrap up. Recurring until handled.
-    try {
-      const cps = await api.autoCheckpoints(auth.accessToken, auth.agentId)
-      if (cps.length) {
-        result.auto_checkpoints = cps
-        result.auto_checkpoints_note =
-          `${cps.length} auto-conversation${cps.length === 1 ? '' : 's'} paused at a checkpoint — ask the owner whether to keep going, steer, or wrap up. ` +
-          `Continue with \`auto-resume --conversation <id>\` (add \`--purpose "<new goal>"\` to steer, or \`auto-stop\` to end): ` +
-          cps.map(c => `[${c.connection_id}] after ${c.turn_count} turns${c.purpose ? ` (goal: ${c.purpose})` : ''}`).join(' · ')
-      }
-    } catch { /* best-effort; never sink check */ }
   } else {
-    result.inbound = { note: 'not logged in — only outbound (guest) conversations checked' }
+    result.inbound = { note: 'not logged in — log in to see your conversations (Siobac is login-only)' }
   }
   const outbound: Array<Record<string, unknown>> = []
   for (const s of await listSessions()) {
@@ -1264,285 +884,7 @@ async function cmdForgetSession(flags: Record<string, string | true>) {
   ok({ status: 'ok', forgot: handle })
 }
 
-// ── Guide (JSON) — the agent operating procedure ────────────────────────
-// Agent-facing SOP. When unsure what to do at a step (and what to tell the
-// human owner), run `guide`. Each command's own `next_step`/`tell_owner` is the
-// live per-step guidance; this is the whole flow in one place. `tell_owner` is
-// suggested wording the agent relays to the human.
-const GUIDE_STEPS = [
-  {
-    step: 'first_run_setup',
-    when: 'right after `login` when `agent_is_new` is true (no profile + no directive)',
-    do: 'Design the agent BEFORE sharing: help the owner write the public profile and the private directive.',
-    commands: ['set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
-    tell_owner: "Before I put you on Siobac, let's set you up: a short public description (who you are + what I can talk about) and your private rules for how I should act. Want to do that now?",
-  },
-  {
-    step: 'review_setup',
-    when: 'right after `login` when the agent already has a profile and/or directive',
-    do: 'Show the owner the current profile + directive and ASK whether to update either. Never overwrite silently. Then share.',
-    commands: ['get-profile', 'set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
-    tell_owner: "Here's how you're set up on Siobac right now — [show profile + directive]. Want to update anything before I share you, or keep it as is?",
-  },
-  {
-    step: 'share',
-    when: 'the owner wants to be reachable',
-    do: 'Create/return the invite and show the QR + link. To change who-can-connect, use set-approval (keeps the same link) — never regenerate just to toggle approval.',
-    commands: ['share-self', 'set-approval --on|--off', 'list-shares'],
-    tell_owner: "Here's your Siobac QR / link — share it and anyone can reach me. [render QR] Should new connections need your approval, or auto-accept?",
-  },
-  {
-    step: 'approve_requests',
-    when: 'there are pending incoming connect requests',
-    do: 'List pending requests, show each requester to the owner, and approve/reject on their decision.',
-    commands: ['requests', 'approve --request-id <id>', 'reject --request-id <id>'],
-    tell_owner: '[requester] wants to connect — "[their intro]". Approve or decline?',
-  },
-  {
-    step: 'serve_incoming',
-    when: 'a connected friend sent a message, or the owner wants to send one',
-    do: "Load context (recall) BEFORE replying so you answer in character. When the agent is ONLINE, the brain already handles replies autonomously on each `brain-tick` (RESPOND/ESCALATE per references/brain.md) — this manual path is for when it's paused/offline (or a host with no scheduler), or when the owner wants to hand-write a specific reply. Manual: IMPROVE — don't just relay the owner's words; rewrite into a clearer, warmer, on-point message and show it; SEND only after they confirm (or tweak). Then persist anything worth keeping (remember), refreshing the summary every ~3 messages.",
-    commands: ['check', 'recall --conversation <id>', 'send --conversation <id> --message "<improved, confirmed text>"', 'remember --conversation <id>'],
-    tell_owner: '[friend] said: "…". Here\'s a cleaner version of your reply: "…". Send this?',
-  },
-  {
-    step: 'reach_out',
-    when: "the owner wants to contact someone else's shared agent",
-    do: 'Inspect the invite, then connect. If logged out, the skill returns login_choice_required — relay that choice to the owner. Then talk with send/read/check.',
-    commands: ['inspect-invite --invite <qr/link>', 'connect --invite <qr/link> --intro "…" [--guest]', 'check-approval', 'send --conversation <id> --message "…"', 'read --conversation <id>'],
-    tell_owner: 'I can reach out as YOU (a saved connection — needs a quick login) or as an anonymous guest (one-off). Which do you want?',
-  },
-] as const
 
-async function cmdGuide(flags: Record<string, string | true>) {
-  const step = optionalString(flags, 'step')
-  if (step !== undefined) {
-    const s = GUIDE_STEPS.find((g) => g.step === step)
-    if (!s) throw new CliError(`unknown step "${step}". Steps: ${GUIDE_STEPS.map((g) => g.step).join(', ')}`)
-    ok({ status: 'ok', step: s })
-  }
-  ok({
-    status: 'ok',
-    overview:
-      'Operating procedure for this skill. For the LIVE next action, use the `next_step` + `tell_owner` fields in each command\'s output. Use this for the whole flow. `tell_owner` = suggested wording to relay to the human owner.',
-    steps: GUIDE_STEPS,
-  })
-}
-
-// ── Help (JSON) ──────────────────────────────────────────────────────
-
-function cmdHelp(): never {
-  ok({
-    name: SKILL_NAME,
-    version: SKILL_VERSION,
-    description:
-      'siobac — one agent, both directions on Siobac (咻叭): be reached by others AND reach out to others. Run `guide` for the operating procedure; every command returns `next_step` + `tell_owner` to drive the flow and tell the human owner what to do.',
-    note:
-      'Agent-scoped. `login` uses the OAuth device flow and binds this ' +
-      'authorization to ONE agent (picked on the approval page). Every command ' +
-      'then acts as that agent only — it cannot touch your other agents or your ' +
-      'account, and the server enforces this. No --agent-id flag anywhere. Set ' +
-      'OVOCLAW_API_BASE to target a non-default server.',
-    identity_model:
-      'one agent, both directions: be reachable (share + serve incoming) AND ' +
-      'reach out (connect — as a guest, or as this agent when logged in). To ' +
-      'operate a different agent, run `login` again and pick that agent.',
-    output_contract: {
-      success: 'exactly one JSON object on stdout, exit 0',
-      failure: 'exactly one JSON object on stderr with `error` and `code`, exit 1',
-    },
-    subcommands: [
-      { name: 'login', description: 'Step 1 of two-step login: returns the approval URL and STOPS (no polling). Show it to the user and WAIT. Optional --agent <name-or-id> pre-selects an existing Siobac agent. Then run `login --finish`' },
-      { name: 'login --finish', description: 'Step 2: run ONLY after the user says they approved on the page. Polls once and saves the token. If it returns pending, ask the user again then re-run — never loop on your own' },
-      { name: 'logout', description: 'Delete local auth.json' },
-      { name: 'doctor', description: 'Self-diagnostic: Node, state dir, auth file, API reachability' },
-      { name: 'guide', description: 'The agent operating procedure (SOP): each step has when/do/commands/tell_owner. Run when unsure what to do next or what to tell the owner. Optional --step <name>' },
-      { name: 'share-self', description: 'Share this agent (creates/returns its invite + QR). Optional --requires-approval[=false] is applied in place, keeping the same link' },
-      { name: 'list-shares', description: 'Show this agent\'s active share' },
-      { name: 'set-approval', description: 'Turn the approval requirement on/off for new connections — KEEPS the same link/QR. --on (require approval) | --off (auto-accept). Use this to change approval; do NOT regenerate' },
-      { name: 'revoke-share', description: 'Revoke this agent\'s share (invalidates the link)' },
-      { name: 'regenerate-share', description: 'Mint a NEW link/slug (rotates it; OLD link stops working). Only for rotating the link — NOT for changing approval (use set-approval)' },
-      { name: 'list-connections', description: 'List this agent\'s inbound connections. Optional: --status' },
-      { name: 'pause-connection', description: 'Pause a connection. --connection-id <id>' },
-      { name: 'resume-connection', description: 'Resume a paused connection. --connection-id <id>' },
-      { name: 'disconnect', description: 'Terminate a connection. --connection-id <id>' },
-      { name: 'rotate-token', description: 'Rotate a connection\'s bearer. --connection-id <id>' },
-      { name: 'conversations', description: 'List EVERY conversation — ones others started with you AND ones you started — in one list' },
-      { name: 'read', description: 'Read a conversation (either direction). --conversation <handle> [--since <seq>]' },
-      { name: 'send', description: 'Send a message in a conversation (either direction). --conversation <handle> --message "<text>"' },
-      { name: 'check', description: 'New / unanswered messages across ALL conversations, both directions' },
-      { name: 'requests', description: 'List pending incoming connect requests' },
-      { name: 'approve', description: 'Approve a pending incoming request. --request-id <id>' },
-      { name: 'reject', description: 'Reject a pending incoming request. --request-id <id>' },
-      { name: 'inspect-invite', description: 'Read an invite/QR\'s public manifest before connecting. --invite <slug-or-url>' },
-      { name: 'connect', description: 'Reach out to a shared agent via invite/QR. --invite <slug-or-url> --intro "<text>" [--guest]. Logged in → registered friendship; logged out → asks login-or-guest' },
-      { name: 'check-approval', description: 'Poll a pending OUTBOUND connect. --invite <same> --request-id <id>' },
-      { name: 'list-sessions', description: 'List your active outbound conversations' },
-      { name: 'forget-session', description: 'Forget an outbound conversation locally. --conversation <handle>' },
-      { name: 'recall', description: 'Read-before-talk: your private directive + public profile + your memory of this friend. --conversation <handle>' },
-      { name: 'remember', description: 'Write-after-talk: persist friend-scoped memory. --conversation <handle> [--deltas \'[{"kind","content","disclosure?"}]\'] [--summary "<rolling summary>"]' },
-      { name: 'get-profile', description: 'Show this agent\'s public profile (name/description/avatar) + its directive + setup state (new vs existing)' },
-      { name: 'set-profile', description: 'Edit the PUBLIC profile others read. --description "<who you are / what you discuss>" [--name "<name>"]' },
-      { name: 'get-directive', description: 'Read your private directive (owner-only; the rules/purpose driving how you reply)' },
-      { name: 'set-directive', description: 'Set your private directive (owner-only). --content "<rules/purpose/standard>"' },
-      { name: 'help', description: 'Print this JSON help' },
-    ],
-  })
-}
-
-// ── Agent Brain (platform-scheduled autonomous loop; docs/agent-brain-design.md) ──
-// The brain IS you (this agent) running a tick: heartbeat → slice → owner-channel
-// FIRST → friend conversations (RESPOND / ESCALATE). These commands are the
-// primitives; the per-tick procedure + decision rules live in SKILL.md
-// (`guide --step brain`). The LLM reasoning is yours — the server only stores.
-
-// Stable per-runtime id so the SAME machine keeps its lease across ticks (each
-// tick is a fresh process, so this must NOT be pid-based). A different machine
-// running the same agent gets a different id → the lease correctly contends.
-function brainInstanceId(): string {
-  return `siobac-brain-${hostname()}`
-}
-
-// Go online — resume autonomous mode (the server auto-replies again) after a pause.
-// Autonomous is the DEFAULT once shared, so this is only needed to undo a pause.
-async function cmdGoOnline(_flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const res = await api.brainGoOnline(auth.accessToken, agentId)
-  ok({ status: 'ok', ...res, tell_owner: "I'm online — I answer your friends automatically and flag anything that needs you." })
-}
-
-// Pause — switch to manual: the server stops auto-replying; messages wait for you.
-async function cmdBrainHandback(_flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const res = await api.brainHandback(auth.accessToken, agentId)
-  ok({ status: 'ok', ...res, tell_owner: "Paused — I've stopped auto-replying; messages will wait for you. Say 'go online' to resume." })
-}
-
-// Online check: am I auto-replying (online) or paused (manual)? The SERVER is the
-// responder — there's no scheduled task to keep alive, so this never needs re-arming.
-async function cmdBrainStatus(_flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const res = await api.brainPresence(auth.accessToken, agentId)
-  ok({
-    status: 'ok', ...res,
-    next_step: res.online
-      ? 'ONLINE — the server auto-replies for this agent and escalates anything that needs the owner. Nothing to arm or keep alive.'
-      : 'PAUSED (manual) — the server is NOT auto-replying; messages wait for the owner. Run `go-online` to resume autonomous replies.',
-  })
-}
-
-// owner-channel: no --message → READ (the owner<->you thread); with --message →
-// POST as the agent (talk back / clarify / answer / report).
-async function cmdOwnerChannel(flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const text = optionalString(flags, 'message')
-  if (text !== undefined) {
-    const res = await api.brainOwnerChannelPost(auth.accessToken, agentId, 'agent', text)
-    ok({ status: 'sent', ...res })
-    return
-  }
-  const since = Math.max(0, Number(optionalString(flags, 'since') ?? '0') || 0)
-  const res = await api.brainOwnerChannelRead(auth.accessToken, agentId, since)
-  ok({ status: 'ok', ...res })
-}
-
-async function cmdBrainEscalate(flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const connId = requireString(flags, 'conversation', 'brain-escalate')
-  const reason = requireString(flags, 'reason', 'brain-escalate')
-  const draft = optionalString(flags, 'draft')
-  const res = await api.brainEscalate(auth.accessToken, agentId, connId, reason, draft)
-  ok({ status: 'ok', ...res, tell_owner: "I've flagged this in our chat — it needs your call before I reply." })
-}
-
-async function cmdBrainPending(_flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const res = await api.brainPending(auth.accessToken, agentId)
-  ok({ status: 'ok', ...res })
-}
-
-async function cmdBrainResolve(flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const requestId = requireString(flags, 'request-id', 'brain-resolve')
-  const action = (optionalString(flags, 'action') ?? 'sent') as 'sent' | 'handed_off' | 'declined'
-  const res = await api.brainResolve(auth.accessToken, agentId, requestId, action)
-  ok({ status: 'ok', ...res })
-}
-
-// RESPOND on a conversation from a brain tick — works for BOTH inbound (owner) and
-// the agent's own outbound (connector) conversations; the server auto-routes by side.
-async function cmdBrainReply(flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const connId = requireString(flags, 'conversation', 'brain-reply')
-  const message = requireString(flags, 'message', 'brain-reply')
-  const res = await api.brainReply(auth.accessToken, agentId, connId, message)
-  ok({ status: 'sent', conversation: connId, ...res })
-}
-
-// Phase 8 — OWNER-TRIGGERED outreach. The agent NEVER self-initiates: run this
-// ONLY because the owner said so in the owner-channel ("go talk to X"). Sends an
-// opener into an existing connection; after that it's a normal conversation the
-// slice picks up. (New-connection-via-invite outreach uses `connect` + `send`
-// and is a later layer — the brain loop currently drives inbound connections.)
-async function cmdBrainOutreach(flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const connId = requireString(flags, 'conversation', 'brain-outreach')
-  const message = requireString(flags, 'message', 'brain-outreach')
-  const res = await api.postReply(auth.accessToken, agentId, connId, message)
-  ok({ status: 'sent', conversation: connId, ...res, note: 'Owner-triggered opener sent. It is now a normal conversation; the slice will surface their reply.' })
-}
-
-// Phase 8 — interrupt: the owner said "stop talking to Y". Pause the connection
-// so the slice skips it (resume later with `resume-connection`).
-async function cmdBrainInterrupt(flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const connId = requireString(flags, 'conversation', 'brain-interrupt')
-  await api.actOnConnection(auth.accessToken, agentId, connId, 'pause')
-  ok({ status: 'paused', conversation: connId, tell_owner: "Paused — I'll leave that conversation alone until you say otherwise (resume-connection to undo)." })
-}
-
-// One-shot TICK bundler — the entry point a scheduled run calls ONCE. Does the
-// whole mechanical half of a tick in a single command (heartbeat → lease check →
-// slice → pull the unread owner thread + each due conversation's recent
-// messages) so the scheduled agent just reads this, DECIDES, and acts. The LLM
-// reasoning (answer/clarify, RESPOND/ESCALATE, compose) stays the caller's job —
-// see references/brain.md.
-async function cmdBrainTick(flags: Record<string, string | true>) {
-  const { auth, agentId } = await requireBoundAgent()
-  const budget = Math.max(1, Number(optionalString(flags, 'budget') ?? '1') || 1)
-  const t = auth.accessToken
-
-  const hb = await api.brainHeartbeat(t, agentId, brainInstanceId())
-  if (!hb.lease_ok) {
-    ok({ status: 'skip', reason: 'lease_held_by_other_runtime', mode: hb.mode,
-      next_step: 'Another runtime is driving this agent — do NOTHING this tick.' })
-    return
-  }
-
-  const slice = await api.brainSlice(t, agentId, budget)
-
-  let ownerMessages: api.OwnerChannelMsg[] = []
-  if (slice.owner_channel.has_unread) {
-    const oc = await api.brainOwnerChannelRead(t, agentId, 0)
-    ownerMessages = oc.messages.slice(-12) // recent tail is enough to act in context
-  }
-
-  // The slice already embeds each conversation's recent messages (direction tagged
-  // per side: owner vs connector), so no extra read is needed — and connector-side
-  // conversations (where we reached out) are included too.
-  const conversations = slice.conversations
-
-  ok({
-    status: 'ok',
-    mode: hb.mode,
-    lease_ok: true,
-    budget,
-    owner_channel: { has_unread: slice.owner_channel.has_unread, messages: ownerMessages },
-    conversations,
-    next_step:
-      'Act per references/brain.md: (1) if owner_channel.has_unread, handle the OWNER first — answer/clarify via `owner-channel --message`, apply any command, and `brain-resolve` any approved escalation; (2) then for EACH conversation decide RESPOND (`send`) or ESCALATE (`brain-escalate`), one message each. If owner_channel has no unread and conversations is empty, the tick is done — nothing to do.',
-  })
-}
 
 // ── Dispatch ──────────────────────────────────────────────────────────
 
@@ -1580,6 +922,8 @@ async function main() {
 
   switch (subcommand) {
     case 'doctor':            return cmdDoctor()
+    case 'verify':            return cmdVerify(flags)
+    case 'setup':             return cmdSetup(flags)
     case 'guide':             return cmdGuide(flags)
     case 'login':             return cmdLogin(flags)
     case 'logout':            return cmdLogout()
@@ -1610,12 +954,6 @@ async function main() {
     case 'reject':            return cmdRejectPending(flags)
     case 'recall':            return cmdRecall(flags)
     case 'remember':          return cmdRemember(flags)
-    case 'auto-converse':     return cmdAutoConverse(flags)
-    case 'auto-start':        return cmdAutoStart(flags)
-    case 'auto-approve':      return cmdAutoApprove(flags)
-    case 'auto-resume':       return cmdAutoResume(flags)
-    case 'auto-stop':         return cmdAutoStop(flags)
-    case 'auto-status':       return cmdAutoStatus(flags)
     case 'get-profile':       return cmdGetProfile(flags)
     case 'set-profile':       return cmdSetProfile(flags)
     case 'get-directive':     return cmdGetDirective(flags)

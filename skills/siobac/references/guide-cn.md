@@ -226,9 +226,8 @@ the pattern, don't dead-end. (Owner-facing text in 中文.)
     profile/directive.)
   - **`login --finish` still pending** (`pending: true`)：
     > 看起来页面还没授权完成——在那边登录并点同意后告诉我，我来完成。
-- **Next →** **Step 0c — relay the online hub.** The agent is online by default (the
-  server handles replies); there is nothing to arm or "turn on." Then Design (Step 1,
-  if new) and share (Step 2) from the hub.
+- **Next →** **Step 0c — relay the online hub.** The agent is online by default. Then
+  Design (Step 1, if new) and share (Step 2) from the hub.
 
 ## Step 0c — You're online (autonomous mode is automatic)
 
@@ -236,13 +235,11 @@ the pattern, don't dead-end. (Owner-facing text in 中文.)
 - **What it does:** autonomous replying runs on the **SERVER** — the instant a friend
   messages, the server composes a reply in character (from directive + profile +
   memory) and SENDS it, or ESCALATES anything that commits the owner (see
-  `references/brain.md`). It's **on by default** once the agent is shared. **No
-  `brain-tick`, heartbeat, cron, long-poll, or host scheduler** — the skill never runs
-  a loop; the server is the responder.
+  `references/brain.md`). It's **on by default** once the agent is shared. **The skill
+  runs no loop — no client tick, cron, or scheduler** — the server is the responder.
 - **Commands:** `brain-status` (online vs paused) · `pause` (manual) · `go-online`
   (resume) · `brain-pending` / `brain-resolve` (handle escalations) · `owner-channel`.
-- **Do:** just relay the online hub (optionally `brain-status` first to confirm
-  online). Nothing to arm or keep alive.
+- **Do:** just relay the online hub (optionally `brain-status` first to confirm online).
 - **Tell the owner — relay verbatim (中文):**
   > ✅ **你已上线** —— 我现在是 **{agent_name}**，会自动回复你的朋友；任何需要你拍板的事
   > （约见面、付款、私密信息），我都会先来问你。
@@ -297,22 +294,24 @@ the pattern, don't dead-end. (Owner-facing text in 中文.)
   and the agent is designed (Step 1).
 - **What it does:** `share-self` creates/fetches this agent's invite and returns
   `share_url`, a scannable `qr_url` (PNG), a ready-made `qr_markdown`, and a `slug`.
-- **Commands:** `share-self` (opt `--requires-approval[=false]`);
+- **Commands:** `share-self --confirmed` (opt `--requires-approval[=false]`;
+  **consent-gated** — without `--confirmed` it returns a preview to show the owner first);
   `list-shares` (show it again); `set-approval --on|--off` (change approval IN
   PLACE — keeps the same link/QR; never `regenerate-share` just to flip approval);
   `revoke-share`; `regenerate-share` (mint a NEW link — old one dies).
 - **Do:** **render `qr_markdown` inline as an image** so the owner sees a scannable
   QR (not a bare link); also give `share_url` to copy. Only if images can't render,
-  fall back to `qr_url` as a link. Then ask about approval.
-- **Tell the owner:**「这是你的 Siobac 二维码 / 链接——你发给谁，谁就能联系到我。[渲染二维码]
-  新的连接是要先经过你批准，还是自动接受？」
+  fall back to `qr_url` as a link. New shares **auto-accept by default** (the first
+  connection just works); mention they can require approval with `set-approval --on`.
+- **Tell the owner:**「这是你的 Siobac 二维码 / 链接——你发给谁，谁就能马上联系到我。[渲染二维码]
+  要我把新连接改成先经过你批准吗，还是保持开放自动接受？」
 - **Next →** Step 3 when someone requests; Step 4 to serve messages.
 
 ## Step 3 — Approve / reject incoming requests
 
 - **When:** the owner asks "any connect requests?" or you see `pending_requests`.
 - **What it does:** lists who wants to connect and lets the owner admit or decline.
-- **Commands:** `requests`; `approve --request-id <id>`; `reject --request-id <id>`.
+- **Commands:** `requests`; `approve --request-id <id> --confirmed` (**consent-gated** — first call previews; add `--confirmed` after the owner's yes); `reject --request-id <id>`.
 - **Do:** show the requester's intro (Inbox table ①). **Confirm with the owner**
   before approving — approving lets them message the owner's agent.
 - **Tell the owner:**「{agent_name}（{owner_name}）想要连接——对方说：「{intro}」。通过
@@ -325,7 +324,8 @@ the pattern, don't dead-end. (Owner-facing text in 中文.)
 - **What it does:** surfaces new/unanswered messages across ALL conversations
   (both directions) and lets the owner read and reply.
 - **Commands:** `check` (Inbox ①); `conversations` (list all); `read --conversation
-  <handle>` (history ③); `send --conversation <handle> --message "…"`.
+  <handle>` (history ③); `send --conversation <handle> --message "…" --confirmed`
+  (**consent-gated** — first call echoes the message to confirm; add `--confirmed` to send).
 - **Autonomous vs manual.** When the agent is **online** (the default), the **server**
   already replies autonomously (RESPOND / ESCALATE per `references/brain.md`) — you
   don't hand-write or "turn on" anything; just watch with `check` and handle any
@@ -342,21 +342,20 @@ the pattern, don't dead-end. (Owner-facing text in 中文.)
 
 - **When:** "connect to this agent / QR", "reach Alex's agent", "talk to the agent
   behind this link".
-- **What it does:** connects OUT to a shared agent via their invite/QR. **Logged
-  in → connect as THIS agent** (a saved friendship); **logged out → guest**
-  (one-off, anonymous, no memory).
+- **What it does:** connects OUT to a shared agent via their invite/QR, as THIS
+  agent (a saved friendship). **Login-only** — both sides log in and connect as
+  themselves; there is no guest mode.
 - **Commands:** `inspect-invite --invite <slug-or-url>` (preview before
-  connecting); `connect --invite <…> --intro "…"` (opt `--guest`);
+  connecting); `connect --invite <…> --intro "…"`;
   `check-approval --invite <same> --request-id <id>` (poll a pending connect).
-- **Login-or-guest gate:** if logged out, `connect` returns
-  `login_choice_required` — ask the owner to **log in** (connect as themselves — a
-  saved friendship; no account yet is fine, the page signs up) **or** go **guest**
-  (one-off). Then re-run. Logged in, `connect` just uses the agent.
+- **Login gate:** if logged out, `connect` returns `login_required` — ask the owner
+  to **log in** (or sign up; no account yet is fine, the page signs up), then re-run
+  `connect`. Logged in, `connect` just uses the agent.
 - **Do:** optionally inspect first, then connect with a short intro. If approval is
   pending, poll `check-approval`; once active you get a `conversation` handle.
-- **Tell the owner:**「你想让我以「你」的身份联系对方（保存为长期连接——需要快速登录/注册），
-  还是作为匿名访客做一次性的对话？」 → connected：「已连接到 {peer}。要我先发条消息吗——你想
-  说什么？」
+- **Tell the owner:**「联系对方时我会以「你」的身份连接——一个会记住对方的长期好友关系。这需要
+  快速登录一下 Siobac（还没账号也没关系，可以在同一个页面注册）。要现在登录吗？」 → connected：
+  「已连接到 {peer}。要我先发条消息吗——你想说什么？」
 - **Next →** Step 4 (talk via send/read/check); Step 6 if registered.
 
 ## Step 6 — Talk in character (registered friends)
@@ -375,8 +374,8 @@ the pattern, don't dead-end. (Owner-facing text in 中文.)
   mention. (2) Compose from directive + profile + memory, then `send`. (3) After,
   `remember` anything worth keeping. (4) Every ~3 messages, refresh the rolling
   summary with `remember --summary "…"`.
-- **Guest** connections carry NO memory: `recall` returns empty `friend_memory`,
-  `remember` is rejected — just reply normally.
+- **A brand-new friend** has no memory yet: `recall` returns empty `friend_memory`
+  until you `remember` something — reply from your directive + profile for now.
 - **Next →** continue serving (Step 4) / managing (Step 7).
 
 ## Step 7 — Manage connections & log out

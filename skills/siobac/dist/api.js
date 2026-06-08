@@ -12,14 +12,36 @@ export function makeApiError(code, message, extras = {}) {
         err.body = extras.body;
     return err;
 }
-// This is the TEST/playground build: it targets the dev environment (the /dev
-// tunnel to the local server) so testing never touches public production data.
-// The polished public release points at https://api.ovoclaw.com instead.
-// (The Siobac brand keeps the ovoclaw.com backend domain.) Override anytime with
-// SIOBAC_API_BASE (legacy OVOCLAW_API_BASE still honored).
-const DEFAULT_API_BASE = 'https://ovo.ovoclaw.com/dev';
+// PRODUCTION is the default — a fresh install talks to the public server. The
+// dev environment (the /dev tunnel to a local server) is OPT-IN, so testing is a
+// deliberate choice and a release can never accidentally ship pointed at dev.
+// (The Siobac brand keeps the ovoclaw.com backend domain.)
+//
+// Base resolution, in priority order:
+//   1. SIOBAC_API_BASE (or legacy OVOCLAW_API_BASE) — an explicit full URL; wins.
+//   2. SIOBAC_ENV=dev (alias: development/staging, or SIOBAC_DEV=1) — the dev tunnel.
+//   3. default — production.
+const PROD_API_BASE = 'https://api.ovoclaw.com';
+const DEV_API_BASE = 'https://ovo.ovoclaw.com/dev';
+function devOptIn() {
+    const env = (process.env.SIOBAC_ENV ?? '').trim().toLowerCase();
+    if (env === 'dev' || env === 'development' || env === 'staging')
+        return true;
+    const flag = (process.env.SIOBAC_DEV ?? '').trim().toLowerCase();
+    return flag === '1' || flag === 'true' || flag === 'yes';
+}
 export function getApiBase() {
-    return process.env.SIOBAC_API_BASE ?? process.env.OVOCLAW_API_BASE ?? DEFAULT_API_BASE;
+    const explicit = process.env.SIOBAC_API_BASE ?? process.env.OVOCLAW_API_BASE;
+    if (explicit)
+        return explicit;
+    return devOptIn() ? DEV_API_BASE : PROD_API_BASE;
+}
+// Which environment getApiBase() resolved to — for diagnostics (doctor).
+// 'custom' = an explicit SIOBAC_API_BASE/OVOCLAW_API_BASE URL is set.
+export function getApiEnv() {
+    if (process.env.SIOBAC_API_BASE ?? process.env.OVOCLAW_API_BASE)
+        return 'custom';
+    return devOptIn() ? 'dev' : 'prod';
 }
 let seenLatest = null;
 let seenMin = null;
@@ -335,81 +357,6 @@ export async function submitMemory(bearer, agentId, connectionId, deltas) {
         body: { memory_deltas: deltas },
     });
 }
-export async function autoStart(bearer, agentId, connectionId, purpose, maxTurns, mode) {
-    return jsonFetch({
-        method: 'POST',
-        path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-start`,
-        bearer,
-        body: { purpose, ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}), ...(mode ? { mode } : {}) },
-    });
-}
-// Draft mode: approve (optionally edited) the reply the agent drafted, sending
-// it and advancing the session.
-export async function autoApprove(bearer, agentId, connectionId, edited) {
-    return jsonFetch({
-        method: 'POST',
-        path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-approve`,
-        bearer,
-        ...(edited !== undefined ? { body: { edited } } : {}),
-    });
-}
-export async function autoDrafts(bearer, agentId) {
-    const r = await jsonFetch({
-        method: 'GET',
-        path: `/agents/${encodeURIComponent(agentId)}/auto-drafts`,
-        bearer,
-    });
-    return r.drafts;
-}
-// ── Auto-converse v2: per-agent opt-in + checkpoints + resume ─────────────
-// When auto_converse is ON, every connection this agent is part of auto-responds
-// by default (no auto-start) — and if the other end's agent is also on, the two
-// agents converse on their own. The owner watches via `check` and steers via
-// auto-resume; a soft checkpoint pauses them every few turns.
-export async function getAutoConverse(bearer, agentId) {
-    return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/auto-converse`, bearer });
-}
-export async function setAutoConverse(bearer, agentId, enabled) {
-    return jsonFetch({ method: 'PUT', path: `/agents/${encodeURIComponent(agentId)}/auto-converse`, bearer, body: { enabled } });
-}
-export async function autoCheckpoints(bearer, agentId) {
-    const r = await jsonFetch({
-        method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/auto-checkpoints`, bearer,
-    });
-    return r.checkpoints;
-}
-// Continue a checkpoint-paused conversation. An optional purpose re-points
-// (steers) both sides' goal; '' clears it back to free chat.
-export async function autoResume(bearer, agentId, connectionId, purpose) {
-    return jsonFetch({
-        method: 'POST',
-        path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-resume`,
-        bearer,
-        ...(purpose !== undefined ? { body: { purpose } } : {}),
-    });
-}
-export async function autoStop(bearer, agentId, connectionId) {
-    return jsonFetch({
-        method: 'POST',
-        path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-stop`,
-        bearer,
-    });
-}
-export async function autoStatus(bearer, agentId, connectionId) {
-    return jsonFetch({
-        method: 'GET',
-        path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connectionId)}/auto-status`,
-        bearer,
-    });
-}
-export async function autoUpdates(bearer, agentId) {
-    const r = await jsonFetch({
-        method: 'GET',
-        path: `/agents/${encodeURIComponent(agentId)}/auto-updates`,
-        bearer,
-    });
-    return r.updates;
-}
 function classifyInviteStatus(status, body) {
     if (status === 400)
         return 'invalid_request';
@@ -479,39 +426,11 @@ export async function pollConnectionReplies(host, token, sinceSeq, waitSeconds =
         params.set('full', '1'); // whole-conversation read (both directions)
     return inviteFetch(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
 }
-// ── Connector-side auto-response (the agent that connected OUT drives ITS side).
-// Token-authed, full-URL like message/poll. Mirrors the owner-side auto-* but on
-// an OUTBOUND conversation. The server arms side='connector'. Registered
-// (logged-in) connections only — guests have no agent to auto-respond as.
-function authHdr(token, json = false) {
-    return { ...(json ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${token}` };
-}
-export async function autoStartOut(host, token, purpose, maxTurns, mode) {
-    return inviteFetch(`${host}/auto/start`, {
-        method: 'POST', headers: authHdr(token, true),
-        body: JSON.stringify({ purpose, ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}), ...(mode ? { mode } : {}) }),
-    });
-}
-export async function autoStopOut(host, token) {
-    return inviteFetch(`${host}/auto/stop`, { method: 'POST', headers: authHdr(token) });
-}
-export async function autoStatusOut(host, token) {
-    return inviteFetch(`${host}/auto/status`, { method: 'GET', headers: authHdr(token) });
-}
-export async function autoResumeOut(host, token, purpose) {
-    return inviteFetch(`${host}/auto/resume`, {
-        method: 'POST', headers: authHdr(token, purpose !== undefined),
-        ...(purpose !== undefined ? { body: JSON.stringify({ purpose }) } : {}),
-    });
-}
 export async function brainOwnerChannelRead(bearer, agentId, since = 0) {
     return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/owner-channel?since=${since}`, bearer });
 }
 export async function brainOwnerChannelPost(bearer, agentId, from, text) {
     return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/owner-channel`, bearer, body: { from, text } });
-}
-export async function brainHeartbeat(bearer, agentId, instanceId) {
-    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/heartbeat`, bearer, body: { instance_id: instanceId } });
 }
 export async function brainHandback(bearer, agentId) {
     return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/handback`, bearer });
@@ -521,25 +440,14 @@ export async function brainHandback(bearer, agentId) {
 export async function brainGoOnline(bearer, agentId) {
     return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/online`, bearer });
 }
-// Read-only online check (does NOT take the wheel). Used by the owner-interaction
-// presence guard: if !online, the schedule silently dropped — re-arm + tell owner.
+// Read-only check of the server-reported autonomous mode (online vs paused).
+// online=false means the owner paused — surface that; nothing to re-arm (server-driven).
 export async function brainPresence(bearer, agentId) {
     return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/presence`, bearer });
-}
-export async function brainSlice(bearer, agentId, budget) {
-    return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/brain/slice?budget=${budget}`, bearer });
-}
-// Reply on a connection — auto-routes by side (owner vs connector), so it drives
-// BOTH inbound conversations AND the agent's own outbound/connector ones.
-export async function brainReply(bearer, agentId, connId, content) {
-    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connId)}/brain-reply`, bearer, body: { content } });
-}
-export async function brainEscalate(bearer, agentId, connId, reason, proposedDraft) {
-    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/external-connections/${encodeURIComponent(connId)}/escalate`, bearer, body: { reason, proposed_draft: proposedDraft } });
 }
 export async function brainPending(bearer, agentId) {
     return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/brain/pending`, bearer });
 }
-export async function brainResolve(bearer, agentId, requestId, action) {
-    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/brain/pending/${encodeURIComponent(requestId)}/resolve`, bearer, body: { action } });
+export async function brainResolve(bearer, agentId, requestId, action, content) {
+    return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/brain/pending/${encodeURIComponent(requestId)}/resolve`, bearer, body: content !== undefined ? { action, content } : { action } });
 }

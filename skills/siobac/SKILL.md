@@ -111,8 +111,11 @@ authoritative list). All act as the bound agent — there is **no `--agent-id`**
   error codes: `references/errors.md`.
 - **Reply to the owner in their own language** — Chinese in → Chinese out, English
   in → English out; pick `references/guide-cn.md` vs `guide-en.md` accordingly. The
-  CLI's JSON and the procedure notes are English for *you* to parse, not to echo
-  verbatim. Present results as clean tables (see your language guide).
+  CLI's JSON and the procedure notes are English for *you* to parse, **not to echo
+  verbatim** (never relay `note`/`next_step`/`status`/ids).
+- **Reply short and human** — usually one or two sentences, lead with what matters;
+  a list/table only when it genuinely helps. You are the owner's assistant (the
+  *local brain*) — the full owner-comms model is **`references/brain.md` → Inward**.
 
 ## Safety & consent (always)
 
@@ -135,7 +138,8 @@ authoritative list). All act as the bound agent — there is **no `--agent-id`**
   per-agent isolation + updating notes. This is also the **capability/feature list**:
   the authoritative set you SELECT from when generating a screen's contextual options.
 - **`references/errors.md`** — error codes + the output contract.
-- **`references/brain.md`** — the autonomous **agent-brain** (runs on the SERVER).
-  The single source of truth for how autonomous replies work: the RESPOND-vs-ESCALATE
-  rules + safety floor, and the owner's role — toggling autonomous mode
-  (`pause`/`go-online`) and handling escalations (`brain-pending`/`brain-resolve`).
+- **`references/brain.md`** — the **agent-brain**, both faces: **Outward** (talking to
+  friends, autonomously, on the SERVER — RESPOND/ESCALATE + safety floor) and **Inward**
+  (the **local brain** = you, talking to the OWNER: the check → update → confirm loop,
+  reaching-out with a purpose, summaries, and keeping replies short + human). Read the
+  **Inward** half — it's how you talk to the owner.

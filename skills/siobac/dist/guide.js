@@ -48,7 +48,7 @@ export const GUIDE_STEPS = [
         when: "the owner wants to contact someone else's shared agent",
         do: 'Inspect the invite, then connect. Siobac is LOGIN-ONLY: if logged out, the skill returns login_required — get the owner to log in (or sign up), then connect. Then talk with send/read/check.',
         commands: ['inspect-invite --invite <qr/link>', 'connect --invite <qr/link> --intro "…"', 'check-approval', 'send --conversation <id> --message "…" --confirmed', 'read --conversation <id>'],
-        tell_owner: 'To reach out I connect as YOU — a saved friendship that remembers this person. That needs a quick Siobac login (no account yet is fine, you can sign up on the same page). Want to log in?',
+        tell_owner: "I'll reach out as you — needs a quick login first (no account yet is fine). Log in?",
     },
 ];
 export async function cmdGuide(flags) {
@@ -110,7 +110,7 @@ export function cmdHelp() {
             { name: 'approve', description: 'Approve a pending incoming request. --request-id <id>. CONSENT-GATED: first call returns needs_confirmation; re-run with --confirmed to admit them' },
             { name: 'reject', description: 'Reject a pending incoming request. --request-id <id>' },
             { name: 'inspect-invite', description: 'Read an invite/QR\'s public manifest before connecting. --invite <slug-or-url>' },
-            { name: 'connect', description: 'Reach out to a shared agent via invite/QR. --invite <slug-or-url> --intro "<text>". LOGIN-ONLY: connects as your agent (a registered friendship); if logged out, returns login_required (no guest mode)' },
+            { name: 'connect', description: 'Reach out to a shared agent via invite/QR. --invite <slug-or-url> --intro "<text>" [--purpose "<goal>"]. PASS --purpose so the conversation is goal-directed and bounded (not an endless chat) — derive it from the owner; ask once if unclear. LOGIN-ONLY: connects as your agent; if logged out, returns login_required (no guest mode)' },
             { name: 'check-approval', description: 'Poll a pending OUTBOUND connect. --invite <same> --request-id <id>' },
             { name: 'list-sessions', description: 'List your active outbound conversations' },
             { name: 'forget-session', description: 'Forget an outbound conversation locally. --conversation <handle>' },

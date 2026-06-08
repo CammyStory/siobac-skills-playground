@@ -519,7 +519,7 @@ async function cmdSetDirective(flags) {
     ok({
         status: 'ok', agent_id: agentId, updated: true,
         next_step: 'Private directive saved. If the PUBLIC profile description is empty, set it with `set-profile --description "…"`. When both reflect the owner, run `share-self`.',
-        tell_owner: 'Saved your private rules. Ready for me to share you on Siobac, or do you want to set your public description first?',
+        tell_owner: 'Saved your rules. ✅',
     });
 }
 // Show the agent's own profile (public card) + directive + setup state.
@@ -551,7 +551,7 @@ async function cmdSetProfile(flags) {
         agent_id: agentId,
         updated: { description: description !== undefined, name: name !== undefined },
         next_step: 'Public profile updated. If the private DIRECTIVE is not set yet, do `set-directive --content "…"`. Once both reflect the owner, run `share-self` to share.',
-        tell_owner: 'Saved your public profile. Want to set your private rules (directive) too, or go ahead and share you now?',
+        tell_owner: 'Saved your profile. ✅',
     });
 }
 // ── Reach out + unified conversations (merged from ovoclaw-connect) ──────

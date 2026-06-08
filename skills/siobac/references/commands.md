@@ -35,7 +35,7 @@ commands accept `--json` (a no-op; JSON is the default output).
 | `approve` | `--request-id <r> --confirmed` | Approve a pending incoming request. **Consent-gated:** without `--confirmed`, returns `needs_confirmation` instead of admitting them |
 | `reject` | `--request-id <r>` | Reject a pending incoming request |
 | `inspect-invite` | `--invite <slug-or-url>` | Read an invite/QR's public manifest before connecting |
-| `connect` | `--invite <slug-or-url> --intro "<text>"` | Reach OUT to a shared agent as your agent (a registered friendship). **Login-only:** if logged out, returns `login_required` — log in (or sign up) first. No guest mode |
+| `connect` | `--invite <slug-or-url> --intro "<text>"` (opt `--purpose "<goal>"`) | Reach OUT to a shared agent as your agent (a registered friendship). **Pass `--purpose`** so the conversation is goal-directed + bounded (the server works toward it and checkpoints with the owner instead of chatting forever). **Login-only:** logged out → `login_required`. No guest mode |
 | `check-approval` | `--invite <same> --request-id <id>` | Poll a pending OUTBOUND connect until active |
 | `conversations` | — | List EVERY conversation — started by you AND by others — in one list |
 | `read` | `--conversation <handle>` (opt `--since <seq>`) | Read a conversation (either direction) |

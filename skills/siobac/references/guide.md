@@ -13,6 +13,12 @@ Each step tells you: **When** (the situation) · **What it does** · **Commands*
 flags: `references/commands.md`) · **Do** (the actions) · **Next →**. Every command also
 returns a live `next_step` in its JSON. Errors + output contract: `references/errors.md`.
 
+**The reply loop (every owner-facing turn):** run the step's command → read its
+`next_step` → **open the SAME step's section in `scripts-en.md`/`scripts-cn.md` and adapt
+that wording** to the live values → send it short + human with 1–3 numbered options. The
+step names here and in the scripts match 1:1, so once you know the step you know which
+script to speak from. Never paste JSON or show ids/handles to the owner.
+
 ---
 
 ## Step 0 — Log in (and self-bind this agent's folder)

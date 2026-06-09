@@ -33,6 +33,22 @@ Siobac, not Siobac.
 
 ## Quick start
 
+**The reply loop — do this EVERY time you answer the owner (not optional):**
+
+1. **Run the command** for the step (paths A/B below, or `guide` if unsure). Read its
+   **`next_step`** — that's *what to do* **and** *what to convey*.
+2. **Open the matching section in the scripts file** — `references/scripts-en.md`
+   (or `references/scripts-cn.md` if the owner writes Chinese), by step name:
+   *Log in · Design · Share · Approve · Serve · Reach out · "what's new"*. It has an
+   example reply for exactly this situation.
+3. **Adapt that script** to the live values (real name, real message, the options the
+   `next_step` calls for) — **never paste JSON, never show ids/`conversation` handles.**
+4. **Send it short + human**, ending with **1–3 numbered options** when the owner has a
+   decision. Then wait for their reply.
+
+> If you skip step 2 you'll sound robotic and off-voice. The CLI JSON is for *you*;
+> the words the owner sees always come from the scripts. (Voice rules: `brain.md` → Inward.)
+
 The owner runs this skill for one of **two** things — pick the path by intent:
 
 **A · Be reachable** (share yourself so others can connect):

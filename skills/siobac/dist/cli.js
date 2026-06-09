@@ -572,6 +572,43 @@ async function cmdSetProfile(flags) {
 // A conversation handle disambiguates the transport: `s_…` = one I started
 // (connection bearer); anything else = a connection id I own (login token).
 function isActiveHandle(h) { return /^s_[0-9a-f]{16}$/.test(h); }
+// Active-handle connection tokens (`xext_…`) rotate on a short server TTL (~1h);
+// the connection/conversation itself is PERMANENT. On a 401 `session_expired` we
+// silently re-mint the token with the saved `client_secret` (the documented
+// Step-4 refresh — same shadow user, same conversation, no owner approval) and
+// retry the op ONCE, so the agent never sees an "expiry". The refreshed token is
+// persisted AND written back onto the in-memory `sess` so a caller looping over
+// the session (e.g. paged `read`) picks it up on the next iteration. Only if the
+// reauth itself can't mint a fresh token (secret revoked, connection gone) does
+// the ORIGINAL 401 surface — its message already guides re-connect / re-login.
+async function withSessionReauth(sess, op) {
+    try {
+        return await op(sess.token);
+    }
+    catch (e) {
+        if (e?.code !== 'session_expired')
+            throw e;
+        const re = await api.connectToInvite(sess.host, sess.slug, {
+            // The reauth path keys on (client_user_id, client_secret) and ignores the
+            // introduction — but the connect endpoint still requires it (min length 1),
+            // so send a short placeholder rather than an empty string.
+            introduction: '(token refresh)',
+            client_user_id: sess.clientUserId,
+            client_secret: sess.clientSecret,
+        });
+        if (re.status !== 'reauthorized' || !re.token)
+            throw e;
+        sess.token = re.token;
+        if (re.token_expires_at)
+            sess.tokenExpiresAt = re.token_expires_at;
+        await updateSession(sess.handle, {
+            token: re.token,
+            tokenExpiresAt: re.token_expires_at ?? sess.tokenExpiresAt,
+            conversationId: re.conversation_id ?? sess.conversationId,
+        });
+        return await op(re.token);
+    }
+}
 async function persistSession(res, slug, host) {
     if (!res.token || !res.token_expires_at || !res.your_user_id || !res.client_secret) {
         throw new CliError(`connect succeeded but the response is missing token fields (status ${res.status}).`);
@@ -679,7 +716,7 @@ async function cmdRead(flags) {
         if (sinceFlag !== undefined) {
             // Explicit forward page from <since> (the server's /poll returns one capped
             // window of messages with seq > since, oldest-first).
-            const res = await api.pollConnectionReplies(sess.host, sess.token, Math.max(0, Number(sinceFlag) || 0), 0, /* full */ true);
+            const res = await withSessionReauth(sess, (tok) => api.pollConnectionReplies(sess.host, tok, Math.max(0, Number(sinceFlag) || 0), 0, /* full */ true));
             const earliest = res.messages[0]?.seq;
             ok({
                 status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null,
@@ -694,7 +731,7 @@ async function cmdRead(flags) {
         const bySeq = new Map();
         let cursor = 0;
         for (let guard = 0; guard < 20; guard++) {
-            const r = await api.pollConnectionReplies(sess.host, sess.token, cursor, 0, true);
+            const r = await withSessionReauth(sess, (tok) => api.pollConnectionReplies(sess.host, tok, cursor, 0, true));
             if (!r.messages.length)
                 break;
             for (const m of r.messages)
@@ -731,7 +768,7 @@ async function cmdSend(flags) {
         const sess = await getSession(handle);
         if (!sess)
             throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`);
-        const res = await api.sendToConnection(sess.host, sess.token, message);
+        const res = await withSessionReauth(sess, (tok) => api.sendToConnection(sess.host, tok, message));
         // Assert the server actually persisted it (assigned a seq + id) before
         // reporting "sent" — a 200 with no seq means it did NOT land.
         const persisted = typeof res.message?.seq === 'number' && !!res.message?.id;
@@ -782,7 +819,7 @@ async function cmdCheck(_flags) {
     const outbound = [];
     for (const s of await listSessions()) {
         try {
-            const res = await api.pollConnectionReplies(s.host, s.token, s.lastSeq, 0);
+            const res = await withSessionReauth(s, (tok) => api.pollConnectionReplies(s.host, tok, s.lastSeq, 0));
             if (res.last_seq > s.lastSeq)
                 await updateSession(s.handle, { lastSeq: res.last_seq });
             if (res.messages.length)

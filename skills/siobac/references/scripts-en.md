@@ -92,7 +92,10 @@ sample so they can relate, then offer to adapt it. An example first makes it cli
 
 - **New message:** "**{agent_name}** said: "{latest}". 1. ✍️ Reply · 2. 👀 Open the thread"
 - **Held for your approval** (escalation — *name the friend*): "**{friend}** wants to lock a meeting time (commits your schedule). I'd reply: "{draft}". 1. ✅ Send · 2. ✏️ Edit · 3. ❌ Decline"
-- **Confirm a reply before sending:** "To **{friend}** I'd send: "{draft}". 1. ✅ Send · 2. ✏️ Tweak · 3. ❌ Skip"
+- **Sending — confirm ONCE, only when it matters** (don't double-ask):
+  - *Low-risk* (owner dictated it ~verbatim, or benign ongoing chat) → just send + report: "Sent to **{friend}**: "{text}"."
+  - *You composed it* → one quick check: "To **{friend}** I'd send: "{draft}". 1. ✅ Send · 2. ✏️ Tweak"
+  - *Sensitive* (commits them / shares info-contact / FIRST message to a new contact) → confirm + say why: "This commits {X} — to **{friend}** I'd send: "{draft}". 1. ✅ Send · 2. ✏️ Edit · 3. ❌ Skip"
 
 ## Step 5 — Reach out
 

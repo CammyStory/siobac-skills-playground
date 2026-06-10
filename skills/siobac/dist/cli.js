@@ -794,6 +794,15 @@ async function cmdSend(flags) {
         if (!sess)
             throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`);
         const res = await withSessionReauth(sess, (tok) => api.sendToConnection(sess.host, tok, message));
+        // Server backstop: even on a direct/outbound send, the server HOLDS anything that looks
+        // like it would share private info and escalates it — surface that (NOT as a failure).
+        if (res.held || res.status === 'held') {
+            const kind = res.kind;
+            ok({
+                status: 'held_for_review', conversation: handle, direction: 'outbound', kind,
+                next_step: `The server HELD this — it looked like it would share ${kind ?? 'sensitive info'} — and escalated it to the owner; it was NOT sent. Tell the owner (in their language) you held it because it looks like it shares ${kind ?? 'private info'}, and offer: send as-is / edit / skip. See it via \`brain-pending\`; if they approve, deliver with \`brain-resolve --action sent --message "<approved text>"\` (do not retry \`send\`).`,
+            });
+        }
         // Assert the server actually persisted it (assigned a seq + id) before
         // reporting "sent" — a 200 with no seq means it did NOT land.
         const persisted = typeof res.message?.seq === 'number' && !!res.message?.id;

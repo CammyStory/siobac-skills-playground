@@ -47,6 +47,7 @@ principle below came from a real mark during a live role-play test.
 - **P9 Self-describing consent previews.** A `needs_confirmation` preview names *who/what* it affects (e.g. `approve` carries the requester name + intro), so the owner decides from the preview alone. (Mark.)
 - **P12 Escalation acknowledges the friend.** When the brain escalates mid-conversation, it sends the OTHER agent a brief, non-leaking holding line ("Let me check on my side and get back to you") instead of going silent — the real reply lands once the owner resolves. *(Server: a new hold posts a one-time friend-ack.)* (Mark.)
 - **P13 Honor standing authorizations.** A blanket OK with a window ("any afternoon — feel free to book") is applied **within that window without re-asking** (auto-confirm inside, escalate only outside) AND **persisted** (`remember` / the conversation purpose) so the autonomous brain honors it too. Owner context from the side-chat must reach the brain to change its behavior. (Mark.)
+- **P14 Confirm once, only when it matters (risk-aware send).** The owner's request IS the intent — draft straight away, never a separate "do you want to send?" step. **Low-risk** (owner dictated it ~verbatim / benign chat) → send directly + report. **Composed** → one confirm on the final wording. **Sensitive** (commits them / shares info-contact / first message to a new contact / credentials) → always confirm + name the reason. Backstop: the server scans every send and **holds** disclosures regardless, so a mis-judged direct send is caught, not leaked. (Mark: it confirmed twice — once for intent, once for the drafted text.)
 
 ### F · Robustness
 - **P8 Graceful errors.** Every failure (API error or bad input) gives a plain-language reason + the one thing to do — never a raw error/code. Common errors have script entries; CLI errors carry an owner-facing `next_step`. (Marks: bad link; `recall` missing id.)
@@ -92,6 +93,7 @@ For **every** owner-facing reply:
 - **(k)** *(escalation)* the friend gets a holding ack + the owner hold is self-describing? *[P12, P9]*
 - **(l)** *(standing OK)* applied within the window without re-asking + persisted to the brain? *[P13]*
 - **(m)** *(menus)* lead with the most-used action / offer the real next moves? *[P3, P11]*
+- **(n)** *(sending)* confirmed once and only when warranted — direct for low-risk, preview for sensitive/committing/first-contact — never double-asked? *[P14]*
 
 A reply that fails any check is a **finding** — record it as "mark this", and feed it back into
 the scripts / SKILL.md (owner copy) or the server (behavior) on the next pass.

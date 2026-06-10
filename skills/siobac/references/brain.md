@@ -92,7 +92,12 @@ Whenever the owner engages you (or asks "anything new?"):
    - approve/edit a held reply → `brain-resolve --action sent --message "<approved>"`
      (delivers it scan-bypassed **and** clears the hold; don't also run `send`).
    - admit a connection → `approve --confirmed`.
-   - a reply you drafted on their behalf → `send --confirmed`.
+   - **sending a message → confirm ONCE, only when it matters** (don't double-ask). Low-risk
+     (owner dictated it ~verbatim, or benign ongoing chat) → `send --confirmed` directly and
+     report what went. You composed it → show the draft ONCE, send on a yes. Sensitive
+     (commits them / shares info-contact / FIRST message to a new contact / credentials) →
+     ALWAYS show the preview + name the reason; never self-confirm. (Server holds anything that
+     looks like a disclosure either way → `held_for_review`.)
    - "I'll handle it" → `brain-resolve --action handed_off`; decline →
      `brain-resolve --action declined`.
    - **Standing OK:** if the owner gave a blanket authorization with a window ("any afternoon

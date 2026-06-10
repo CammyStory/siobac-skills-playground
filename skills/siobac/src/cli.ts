@@ -900,9 +900,13 @@ async function cmdConversations(_flags: Record<string, string | true>) {
   for (const s of await listSessions()) {
     conversations.push({ conversation: s.handle, direction: 'outbound', started: 'I connected out', peer: s.peerAgentName ?? null, slug: s.slug, host: s.host, created_at: s.createdAt, token_expires_at: s.tokenExpiresAt })
   }
+  const loggedIn = !!(auth && auth.agentId)
   ok({
-    status: 'ok', logged_in: !!(auth && auth.agentId), count: conversations.length, conversations,
-    next_step: "These are the owner's conversations: `direction: inbound` = someone connected to them, `outbound` = they reached out. Summarize for the owner BY PEER NAME in their language (never show the `conversation` handle). To see messages in one, `read --conversation <its conversation value>`; to reply, `send --conversation <that> --message \"<text>\"`.",
+    status: 'ok', logged_in: loggedIn, count: conversations.length, conversations,
+    next_step: loggedIn
+      ? "These are the owner's conversations: `direction: inbound` = someone connected to them, `outbound` = they reached out. Summarize for the owner BY PEER NAME in their language (never show the `conversation` handle). To see messages in one, `read --conversation <its conversation value>`; to reply, `send --conversation <that> --message \"<text>\"`."
+      // LOGGED OUT: only local OUTBOUND sessions are listed; inbound is hidden. Don't imply this is the full picture.
+      : "NOT LOGGED IN — this lists only the owner's OUTBOUND conversations; their INBOUND ones are hidden until they log in. Tell the owner (in their language) you need a quick login to see who's connected to them, then run `login` → `login --finish`. Summarize any `outbound` entries meanwhile.",
   })
 }
 
@@ -1030,6 +1034,8 @@ async function cmdCheck(_flags: Record<string, string | true>) {
   } else {
     result.inbound = { note: 'not logged in — log in to see your conversations (Siobac is login-only)' }
   }
+  const loggedIn = !!(auth && auth.agentId)
+  result.logged_in = loggedIn
   const outbound: Array<Record<string, unknown>> = []
   for (const s of await listSessions()) {
     try {
@@ -1039,8 +1045,11 @@ async function cmdCheck(_flags: Record<string, string | true>) {
     } catch { /* a dead session shouldn't sink the whole check */ }
   }
   result.outbound = outbound
-  result.next_step =
-    "One scan of everything needing the owner. In `inbound.threads`: `held: true` (has a `request_id`) = the server already escalated a reply for the owner's approval — surface it ONCE as \"needs your OK\" and resolve via `brain-pending`/`brain-resolve` (never also as a normal new message). `held: false` with `unread_count` > 0 = new messages the server is handling or that need a look — `read --conversation <connection_id>`. `inbound.pending_requests` = people asking to connect (approve/reject). `outbound[].new_messages` = replies on conversations the owner started. Give the owner ONE short digest in their language (by friend name, never raw ids/handles); if nothing is held/unread/pending, tell them their queue is clear."
+  result.next_step = loggedIn
+    ? "One scan of everything needing the owner. In `inbound.threads`: `held: true` (has a `request_id`) = the server already escalated a reply for the owner's approval — surface it ONCE as \"needs your OK\" and resolve via `brain-pending`/`brain-resolve` (never also as a normal new message). `held: false` with `unread_count` > 0 = new messages the server is handling or that need a look — `read --conversation <connection_id>`. `inbound.pending_requests` = people asking to connect (approve/reject). `outbound[].new_messages` = replies on conversations the owner started. Give the owner ONE short digest in their language (by friend name, never raw ids/handles); if nothing is held/unread/pending, tell them their queue is clear."
+    // LOGGED OUT: do NOT say "queue is clear" — inbound is invisible. Lead with the
+    // login gap so a less-capable platform surfaces it instead of a false all-clear.
+    : "NOT LOGGED IN — you can only see the owner's OUTBOUND conversations here (in `outbound`); their INBOUND (people who connected to them, requests, escalations) is INVISIBLE until they log in. Do NOT tell the owner their queue is clear. Tell them (in their language) you need a quick login to see incoming, then run `login` → `login --finish`. Still summarize anything in `outbound` if present."
   ok(result)
 }
 

@@ -193,6 +193,9 @@ async function cmdLoginFinish(_flags: Record<string, string | true>) {
   try {
     if (auth.agentId) prof = await api.getAgentProfile(auth.accessToken, auth.agentId)
   } catch { /* ignore */ }
+  // An already-DESIGNED (non-new) agent has a confirmed name — record that locally so a
+  // fresh state dir on another machine doesn't re-prompt the name step for it.
+  if (prof && !prof.is_new) await markNameConfirmed(agentName)
   const rememberLabel = agentName ?? auth.agentId
   const binding = await ensureAgentBinding(false)
   ok({
@@ -712,8 +715,9 @@ async function cmdSetProfile(flags: Record<string, string | true>) {
   const { auth, agentId } = await requireBoundAgent()
   await api.setAgentProfile(auth.accessToken, agentId, { description, name, owner_msg_seq: ownerMsgSeq !== undefined ? Number(ownerMsgSeq) : undefined })
   // Setting the NAME confirms it — record that locally so the setup checklist's name
-  // step reads as done (the server has no name-confirmed flag for a new auto-named agent).
-  if (name !== undefined) await markNameConfirmed()
+  // step reads as done (the server has no name-confirmed flag for a new auto-named agent),
+  // and refresh the remembered display name so re-login doesn't pre-select a stale one.
+  if (name !== undefined) await markNameConfirmed(name)
   ok({
     status: 'profile_updated',
     agent_id: agentId,

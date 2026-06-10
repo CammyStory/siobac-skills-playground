@@ -330,6 +330,16 @@ export async function cmdSetup(_flags: Record<string, string | true>) {
     reachErr = (e as api.ApiError).code ?? (e as Error).message
   }
   if (!profile) {
+    // not_found = the bound agent no longer exists (deleted). That's NOT a connectivity
+    // blip — re-login/doctor won't help; the owner needs a different or fresh agent.
+    if (reachErr === 'not_found' || reachErr === 'not_authenticated') {
+      ok({
+        status: 'agent_missing', logged_in: true, agent_id: agentId,
+        reason: 'this login is bound to an agent that no longer exists (it was deleted).',
+        next_step: "The agent this login was bound to no longer exists — it was deleted, so there's nothing to set up here. Tell the owner (in their language), then either create a new agent in the OvOclaw app, or run `login` again and pick a DIFFERENT agent to manage. Do NOT keep retrying `setup`/`doctor` — the agent is gone, not unreachable.",
+      })
+      return
+    }
     ok({
       status: 'setup_unknown', logged_in: true, agent_id: agentId,
       reason: `logged in, but could not reach the server to read setup state (${reachErr})`,

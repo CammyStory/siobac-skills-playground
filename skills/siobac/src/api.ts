@@ -820,7 +820,10 @@ export async function brainHandback(bearer: string, agentId: string): Promise<{ 
 export async function brainGoOnline(bearer: string, agentId: string): Promise<{ mode: 'auto' }> {
   return jsonFetch({ method: 'POST', path: `/agents/${encodeURIComponent(agentId)}/online`, bearer })
 }
-export interface BrainPresence { mode: 'auto' | 'paused'; online: boolean; last_tick_at: string | null; seconds_since_tick: number | null; offline_after_ms: number }
+// mode + online only. (Earlier builds also carried last_tick_at/seconds_since_tick/
+// offline_after_ms — vestiges of a client-scheduled brain that never shipped; online is
+// purely !paused, so they were dead/misleading and the server no longer returns them.)
+export interface BrainPresence { mode: 'auto' | 'paused'; online: boolean }
 // Read-only check of the server-reported autonomous mode (online vs paused).
 // online=false means the owner paused — surface that; nothing to re-arm (server-driven).
 export async function brainPresence(bearer: string, agentId: string): Promise<BrainPresence> {

@@ -229,12 +229,28 @@ export async function clearAuth() {
     }
 }
 // Mark the bound agent's NAME as confirmed (idempotent; no-op if no binding yet).
-// Called when the owner sets the name via `set-profile --name`.
-export async function markNameConfirmed() {
+// Called when the owner sets the name via `set-profile --name`, and on login --finish
+// for an already-designed (non-new) agent so a fresh state dir on another machine
+// doesn't re-prompt the name for an agent that's clearly already set up.
+// `name`, when given, also refreshes the remembered display name (it goes stale when
+// the profile is renamed, which made re-login pre-select / show the wrong name).
+export async function markNameConfirmed(name) {
     const bound = await loadBoundAgent();
-    if (!bound || bound.nameConfirmedAt)
+    if (!bound)
         return;
-    await saveBoundAgent({ ...bound, nameConfirmedAt: new Date().toISOString() });
+    const next = { ...bound };
+    let changed = false;
+    if (!bound.nameConfirmedAt) {
+        next.nameConfirmedAt = new Date().toISOString();
+        changed = true;
+    }
+    const trimmed = name?.trim();
+    if (trimmed && bound.agentName !== trimmed) {
+        next.agentName = trimmed;
+        changed = true;
+    }
+    if (changed)
+        await saveBoundAgent(next);
 }
 export async function loadBoundAgent() {
     try {

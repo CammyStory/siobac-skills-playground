@@ -1,6 +1,6 @@
 // Agent-brain owner surface (the brain itself runs on the SERVER). Extracted from cli.ts.
 import * as api from './api.js';
-import { requireString, optionalString } from './argparse.js';
+import { requireString, optionalString, optionalNonNegInt } from './argparse.js';
 import { ok, requireBoundAgent } from './runtime.js';
 // ── Agent Brain — owner surface (the brain itself runs on the SERVER) ──
 // docs/agent-brain-design.md, references/brain.md. The server composes + sends
@@ -43,7 +43,7 @@ export async function cmdOwnerChannel(flags) {
         ok({ status: 'sent', ...res, next_step: 'Posted to the owner-channel as the agent. Nothing else needed unless the owner asked a question that needs a follow-up command.' });
         return;
     }
-    const since = Math.max(0, Number(optionalString(flags, 'since') ?? '0') || 0);
+    const since = optionalNonNegInt(flags, 'since') ?? 0;
     const res = await api.brainOwnerChannelRead(auth.accessToken, agentId, since);
     ok({
         status: 'ok', ...res,

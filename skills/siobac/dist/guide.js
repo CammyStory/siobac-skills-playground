@@ -11,14 +11,14 @@ export const GUIDE_STEPS = [
     {
         step: 'first_run_setup',
         when: 'right after `login` when `agent_is_new` is true (no profile + no directive)',
-        do: 'Design the agent BEFORE sharing: help the owner write the public profile and the private directive.',
-        commands: ['set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
+        do: 'Design the agent BEFORE sharing, in THREE steps: (1) confirm or change the auto-assigned NAME, (2) write the public profile, (3) write the private directive. When you show an example, ADAPT it to the owner — never save the sample verbatim.',
+        commands: ['set-profile --name "…"', 'set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
     },
     {
         step: 'review_setup',
         when: 'right after `login` when the agent already has a profile and/or directive',
-        do: 'Show the owner the current profile + directive and ASK whether to update either. Never overwrite silently. Then share.',
-        commands: ['get-profile', 'set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
+        do: 'Show the owner the current NAME + profile + directive and ASK whether to update any. Never overwrite silently. Then share.',
+        commands: ['get-profile', 'set-profile --name "…"', 'set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
     },
     {
         step: 'share',

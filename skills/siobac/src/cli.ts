@@ -629,7 +629,7 @@ async function cmdGetProfile(_flags: Record<string, string | true>) {
     directive_set: p.directive_set,
     next_step: p.is_new
       ? "This agent is NEW. Tell the owner (in their language) it's online by default once shared, then DESIGN it in THREE steps (scripts → Step 1): (1) NAME — confirm or change the auto-name via `set-profile --name \"…\"`; (2) public profile `set-profile --description \"…\"`; (3) private directive `set-directive --content \"…\"`. If you show an example, ADAPT it to the owner — never save the sample as-is. Then `share-self` for the QR/link."
-      : "Show the owner (in their language) their current profile + directive and ask if they want to change either (`set-profile` / `set-directive`) — never overwrite silently. The server already auto-replies in character from these; they can `share-self`, `pause`, or `go-online`.",
+      : "Show the owner (in their language) their current NAME + profile + directive and ask if they want to change any (`set-profile --name` / `set-profile --description` / `set-directive`) — never overwrite silently. The server already auto-replies in character from these; they can `share-self`, `pause`, or `go-online`.",
   })
 }
 

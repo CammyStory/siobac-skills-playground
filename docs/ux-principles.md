@@ -79,6 +79,14 @@ change): RESPOND · ESCALATE (held + named) · DE-DUP · SILENT-BRAIN · JARGON,
 escalation **friend-ack**. The role-play covers the owner-facing *copy*; the harness covers
 *server behavior*.
 
+**Cross-surface consistency check** — `e2e/check-skill-consistency.sh` (static, no agents). The
+skill describes the same flows on parallel surfaces (owner `scripts`, the `guide` SOP, per-command
+`next_step`s, `version.ts`/`package.json`, the product name); a change to one that misses the
+others causes **drift** — a literal platform reading a different surface gets stale guidance. This
+asserts they agree (e.g. the name-step appears in scripts AND `guide` AND the `next_step`; version
+matches; no stale "ovoclaw" naming). Run after any skill change; add a check whenever a new flow
+spans surfaces. (Mark: the v0.9.68 name-step shipped in the scripts but not the `guide` SOP.)
+
 **Test-loop resilience.** The harness must **pre-flight** that its agents actually exist and are
 logged in (a deleted agent still reports `logged_in:true` but `status:setup_unknown`) and **fail
 fast with the exact fix**, never hardcode keys that an account reset can wipe out from under it.

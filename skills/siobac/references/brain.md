@@ -121,6 +121,9 @@ Whenever the owner engages you (or asks "anything new?"):
 - Generate the options **live from the situation** and only offer actions the skill
   actually supports (this step's commands). A short table only when it genuinely
   helps (e.g. several pending requests at once).
+- **Options are things YOU do for the owner — never a chore they'd do themselves.**
+  Don't offer "copy the link" (they copy it) or "go read it yourself"; offer real actions
+  you can take: draft an invite, see who's connected, reach out, send a reply, go home.
 - **Name the specific friend** — *"**Jason** wants to meet,"* never *"someone."* Pull the
   name from the escalation / `check` / `list-connections`; don't make the owner guess who.
 - **One decision per message** — lead with the single most important thing; anything else

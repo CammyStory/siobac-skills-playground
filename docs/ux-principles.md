@@ -34,9 +34,11 @@ principle below came from a real mark during a live role-play test.
 ### B · Navigation & menus
 - **P3 Home hub leads with the most-used action:** `1.📬 What's new from friends · 2.📤 Share me · 3.💬 Reach out · 4.✏️ Manage profile/rules · 5.⏸️ Pause`. Informative but tight. (Mark: too sparse + reorder.)
 - **P11 After setup, offer the real next moves** — `1.📤 Share me · 2.💬 Connect with someone · 3.🏠 Home`, not just "Share / Not yet". (Mark.)
+- **P16 Options are agent actions, not user chores.** Every menu option must be something the *agent* does for the owner — never "copy the link" (they copy it themselves) or "go read it." Offer real actions: draft an invite, see who's connected, reach out, go home. (Mark: "copy the link" is a useless option.)
 
 ### C · Onboarding / design
 - **P10 Two-step guided design** — **public profile first, private rules next** (not one combined prompt). Each step offers the SAME menu: `1.📋 Give me an example · 2.✍️ Help me draft it · 3.⏭️ Skip`. "Draft it" drafts from the owner's one-line gist for a quick ✅/✏️; "example" shows a sample. Scripts carry example profile + directive copy. (Marks: split the step; standard option set; examples help.)
+- **P15 Rich, structured design content.** Examples are **fuller and structured**, not one-liners — a richer profile (who you are · what you're building · what you're looking for · what you'll discuss) gives the agent more to represent the owner well; a structured directive (**Focus · Engage · Share · Protect · Flag**) shows owners what to fill in. The **directive mirrors the profile**, and a **default directive template** ships in the scripts so the platform drafts a strong baseline and tailors it. (Marks: examples too short / no structure / should relate / ship a default.)
 
 ### D · Reaching out & conversations
 - **P6 Context-aware connect.** Detect existing friendship/history → review it and respond in context; don't say "break the ice." Always **name the friend** (`connect` backfills `peer_name` from the manifest). (Marks.)
@@ -51,6 +53,9 @@ principle below came from a real mark during a live role-play test.
 
 ### F · Robustness
 - **P8 Graceful errors.** Every failure (API error or bad input) gives a plain-language reason + the one thing to do — never a raw error/code. Common errors have script entries; CLI errors carry an owner-facing `next_step`. (Marks: bad link; `recall` missing id.)
+
+### G · Sharing & invites (the connect surface)
+- **P17 Simple, current, skill-first sharing.** The connect prompt others copy must be **short and easy to read/copy**, use a **short connect CODE** (not a long URL), name the product correctly (**Siobac**, current repo — not the old "ovoclaw" skill), and the landing page is **skill-first** (no app-download box at this stage). *(Server: share-card / `/share/:slug`.)* (Marks: invite too complex; remove download box; simplify the prompt; stale "ovoclaw" naming.)
 
 ---
 
@@ -94,6 +99,9 @@ For **every** owner-facing reply:
 - **(l)** *(standing OK)* applied within the window without re-asking + persisted to the brain? *[P13]*
 - **(m)** *(menus)* lead with the most-used action / offer the real next moves? *[P3, P11]*
 - **(n)** *(sending)* confirmed once and only when warranted — direct for low-risk, preview for sensitive/committing/first-contact — never double-asked? *[P14]*
+- **(o)** *(setup)* are profile/directive examples rich + structured, and does the directive mirror the profile? *[P15]*
+- **(p)** *(menus)* is every option an action the agent does — never a chore the owner does themselves? *[P16]*
+- **(q)** *(sharing)* is the connect prompt short, code-based, correctly "Siobac", and skill-first (no app-download box)? *[P17]*
 
 A reply that fails any check is a **finding** — record it as "mark this", and feed it back into
 the scripts / SKILL.md (owner copy) or the server (behavior) on the next pass.

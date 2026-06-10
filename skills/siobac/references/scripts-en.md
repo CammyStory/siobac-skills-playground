@@ -45,26 +45,32 @@ keep it tight — the menu IS the hub, don't pad it with profile dumps.
 ## Step 1 — Design the agent (two steps: profile, then rules)
 
 Design BEFORE sharing, in TWO short steps — **public profile first, private rules next**. For
-EACH, offer the SAME three choices so it's easy: `1. 📋 Give me an example · 2. ✍️ Help me
-draft it · 3. ⏭️ Skip for now`. If they pick **"help me draft it,"** ask one line about their
-gist, draft the content, show it for a quick ✅/✏️. If **"give me an example,"** show the
-sample so they can relate, then offer to adapt it. An example first makes it click.
+EACH, offer the SAME three choices: `1. 📋 Give me an example · 2. ✍️ Help me draft it · 3. ⏭️
+Skip for now`. **Make the examples RICH and STRUCTURED** (not one-liners) — a fuller profile
+gives the agent more to represent the owner well and helps others connect; a structured
+directive shows owners exactly what to fill in. The directive should **mirror the profile**.
 
-**Step 1a — Public profile** (the short line OTHERS see — who you are + what you'll chat about):
-> First, your public profile — the short line friends see. Want me to:
-> 1. 📋 Give me an example · 2. ✍️ Help me draft it (just tell me your gist) · 3. ⏭️ Skip for now
+**Step 1a — Public profile** (what OTHERS see — fuller is better: who you are · what you're
+building · who/what you're looking for · what you're happy to discuss):
+> First, your public profile. Want me to: 1. 📋 Give me an example · 2. ✍️ Help me draft it (tell
+> me your gist) · 3. ⏭️ Skip for now
 >
-> *Example:* "Tech professional exploring an AI agent-platform startup — keen to meet potential
-> co-founders and swap ideas on agents, products, and where the space is heading."
+> *Example:* "Product manager building toward a startup in the AI agent-platform space. Looking
+> for a co-founder/partner whose strengths complement mine — to shape the product, pressure-test
+> the direction, and build it together. Happy to swap ideas on agent platforms, product
+> strategy, and where the space is heading; if you're exploring something similar, let's talk."
 
-**Step 1b — Private rules** (just for YOU — how the agent acts on your behalf; never shown to friends):
-> Now your private rules — how I should act for you (tone, what to share or hold back, what to
-> flag). Want me to:
-> 1. 📋 Give me an example · 2. ✍️ Help me draft it · 3. ⏭️ Skip for now
+**Step 1b — Private rules** (just for YOU; never shown to friends). **Default structure — draft
+from this and tailor to their profile** (most owners want this backbone):
+> Now your private rules. Want me to: 1. 📋 Give me an example · 2. ✍️ Help me draft it · 3. ⏭️ Skip for now
 >
-> *Example:* "Keep chats on-topic to my profile; be warm and curious about who I'm talking to;
-> never share my personal or private info, and don't commit to meetings or deals without
-> checking with me first."
+> *Example (Focus · Engage · Share · Protect · Flag):*
+> "Represent me warmly, professionally, and concisely.
+> - **Focus:** keep conversations on what I'm building — {their topics, from the profile}.
+> - **Engage:** be genuinely curious about who you're talking to — their role, what they're building, and whether there's a real fit.
+> - **Share:** talk freely about my public profile and my thinking on the space; never reveal my personal, financial, or contact details.
+> - **Protect me:** don't commit me to meetings, money, or partnerships without checking with me first; hold anything sensitive for my approval.
+> - **Flag:** surface anyone who looks like a strong fit, and anything that needs my decision."
 
 **Existing agent** (already designed): "Here's how you're set up: {profile} / rules set.
 1. ✏️ Update profile · 2. ✏️ Update rules · 3. 📤 Share as-is"
@@ -81,7 +87,10 @@ sample so they can relate, then offer to adapt it. An example first makes it cli
 (The approval choice was already settled in the share confirmation — don't ask it again.)
 > Done — here's your QR / link, share it and people can reach me.
 > *[render qr_markdown inline]* {share_url}
-> 1. 📋 Copy the link · 2. 📬 Check for connections
+> 1. ✍️ Draft an invite to send · 2. 📬 See who's connected · 3. 🏠 Home
+
+*(Options are things YOU do for the owner — never "copy the link" (they'd copy it themselves).
+Offer real actions: draft an invite, see who's connected, reach out, go home.)*
 
 ## Step 3 — Approve a request
 

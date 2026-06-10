@@ -37,7 +37,7 @@ principle below came from a real mark during a live role-play test.
 - **P16 Options are agent actions, not user chores.** Every menu option must be something the *agent* does for the owner — never "copy the link" (they copy it themselves) or "go read it." Offer real actions: draft an invite, see who's connected, reach out, go home. (Mark: "copy the link" is a useless option.)
 
 ### C · Onboarding / design
-- **P10 Two-step guided design** — **public profile first, private rules next** (not one combined prompt). Each step offers the SAME menu: `1.📋 Give me an example · 2.✍️ Help me draft it · 3.⏭️ Skip`. "Draft it" drafts from the owner's one-line gist for a quick ✅/✏️; "example" shows a sample. Scripts carry example profile + directive copy. (Marks: split the step; standard option set; examples help.)
+- **P10 Guided onboarding: name → profile → rules.** First-run confirms the agent's **NAME** (fix odd auto-names like "Jasonliao2"), then the **public profile**, then the **private rules** — separate steps, not one prompt. Each offers the SAME menu: `1.📋 Give me an example · 2.✍️ Help me draft it · 3.⏭️ Skip`. **Personalize, never verbatim:** picking "example" or "use this" always means *adapting it to the owner* (a quick follow-up), not saving the generic sample as-is — or every agent ends up identical. "Draft it" drafts from the owner's gist for a quick ✅/✏️. (Marks: split the step; standard menu; examples help; **name missing from onboarding; "use this" risks identical agents** — v0.9.67.)
 - **P15 Rich, structured design content.** Examples are **fuller and structured**, not one-liners — a richer profile (who you are · what you're building · what you're looking for · what you'll discuss) gives the agent more to represent the owner well; a structured directive (**Focus · Engage · Share · Protect · Flag**) shows owners what to fill in. The **directive mirrors the profile**, and a **default directive template** ships in the scripts so the platform drafts a strong baseline and tailors it. (Marks: examples too short / no structure / should relate / ship a default.)
 
 ### D · Reaching out & conversations
@@ -78,6 +78,13 @@ version). Each scenario lists the principles it should exercise.
 change): RESPOND · ESCALATE (held + named) · DE-DUP · SILENT-BRAIN · JARGON, plus the
 escalation **friend-ack**. The role-play covers the owner-facing *copy*; the harness covers
 *server behavior*.
+
+**Test-loop resilience.** The harness must **pre-flight** that its agents actually exist and are
+logged in (a deleted agent still reports `logged_in:true` but `status:setup_unknown`) and **fail
+fast with the exact fix**, never hardcode keys that an account reset can wipe out from under it.
+Agent keys are configurable (`A_KEY`/`B_KEY`/`C_KEY`); login is interactive, so the harness
+guides you to log them in rather than failing cryptically mid-run. (Mark: the wipe broke the
+default `real2`/`real-test`/`connector-b` agents — v0.9.67.)
 
 ---
 

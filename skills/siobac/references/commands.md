@@ -40,7 +40,7 @@ commands accept `--json` (a no-op; JSON is the default output).
 | `conversations` | — | List EVERY conversation — started by you AND by others — in one list |
 | `read` | `--conversation <handle>` (opt `--since <seq>`) | Read a conversation (either direction) |
 | `send` | `--conversation <handle> --message "<text>" --confirmed` | Send a message in a conversation (either direction). **Consent-gated:** without `--confirmed`, returns `needs_confirmation` echoing the message instead of sending |
-| `check` | — | New / unanswered messages across ALL conversations, both directions |
+| `check` | — | The single complete "what's new" scan, both directions: new/unanswered messages PLUS `needs_you` (held escalations on inbound AND outbound/connect convos — incl. agent↔agent "keep going?" checkpoints). Self-complete — no separate `brain-pending` needed just to SEE what's pending. |
 | `list-connections` | — (opt `--status`) | List this agent's inbound connections |
 | `pause-connection` | `--connection-id <c>` | Temporarily pause an inbound connection |
 | `resume-connection` | `--connection-id <c>` | Resume from paused |

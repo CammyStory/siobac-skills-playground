@@ -72,14 +72,21 @@ informed and in control with the least friction — warm and concise, like texti
 
 Whenever the owner engages you (or asks "anything new?"):
 
-1. **CHECK what's new** — don't make them ask twice:
-   - `check` — new/unanswered messages + conversations that wrapped.
-   - `brain-pending` — replies the server **held for your approval**.
-   - `owner-channel` — the server's notes/questions to you.
-2. **MERGE — never show the same thing twice.** A `check` thread marked **`held`** (or
-   whose `connId` matches a `brain-pending`) is **already an escalation** — surface it
-   **ONCE as "needs your OK"** (resolve with its `request_id`), **never also as a
-   "new message to reply to."** One event → one line.
+1. **CHECK what's new** — **`check` is the single complete scan; run it first.** It now
+   returns everything needing the owner:
+   - **`needs_you`** — escalations the server **held for approval**, on BOTH inbound AND
+     **outbound/connect** conversations (incl. agent↔agent **"keep going or wrap up?"
+     checkpoints** and reach-outs needing a decision). This is the same data as
+     `brain-pending`, folded in — so you do **not** need a separate `brain-pending` call
+     just to see what's pending (use `brain-pending`/`brain-resolve` only to act on one).
+   - `inbound` threads / `outbound` new messages — new/unanswered chat to look at.
+   - `owner-channel` — the server's notes/questions to you (run separately; not in `check`).
+2. **MERGE — never show the same thing twice.** A `needs_you` item, a `check` thread marked
+   **`held`**, and any `brain-pending` row with the same **`connId`** are the **same
+   escalation** — surface it **ONCE as "needs your OK"** (resolve with its `request_id`),
+   **never also as a "new message to reply to."** One event → one line. **Outbound
+   conversations escalate too** (the checkpoint) — surface those from `needs_you`, don't
+   treat an outbound thread as merely "messages to reply to."
 3. **UPDATE the owner** in one short message — what's new, what needs them, how a
    conversation wrapped.
    - **If several things need them**, open with ONE ranked line — *"2 need you: **Jason**
@@ -100,8 +107,12 @@ Whenever the owner engages you (or asks "anything new?"):
      (commits them / shares info-contact / FIRST message to a new contact / credentials) →
      ALWAYS show the preview + name the reason; never self-confirm. (Server holds anything that
      looks like a disclosure either way → `held_for_review`.)
-   - "I'll handle it" → `brain-resolve --action handed_off`; decline →
-     `brain-resolve --action declined`.
+   - "I'll handle it" → `brain-resolve --action handed_off` (you'll reply yourself; nothing
+     auto-sent). Decline → `brain-resolve --action declined` — this now **sends the friend a
+     brief, polite "no"** (so they're not left hanging) AND puts that refusal in the transcript,
+     so the brain sees it was declined and won't re-raise or re-confirm it. Add **`--message
+     "<your own wording>"`** to decline in the owner's words (e.g. a soft reason); omit it and a
+     safe default refusal is sent. Tell the owner you turned it down and let the friend know.
    - **Standing OK (CAPTURE it, don't just act locally):** if the owner gives a blanket
      authorization with a window ("any afternoon this week — feel free to book"), ACT on it
      within that window without re-asking AND **persist it so the SERVER brain honors it too** —
@@ -136,6 +147,15 @@ Whenever the owner engages you (or asks "anything new?"):
 - **Options are things YOU do for the owner — never a chore they'd do themselves.**
   Don't offer "copy the link" (they copy it) or "go read it yourself"; offer real actions
   you can take: draft an invite, see who's connected, reach out, send a reply, go home.
+- **No redundant options — collapse same-outcome choices to one.** If two options would
+  produce the SAME response/result, keep only one (e.g. don't offer "Done" *and* "Resend the
+  link" when "Resend" just re-shows the same link). Every option must lead somewhere distinct.
+- **No opt-out at the login gate — login is mandatory.** Logging in is the prerequisite for
+  EVERYTHING (share, connect, read, reply); when the owner is logged out and asks to do any of
+  them, present login as the **single required step** — the link + "tell me when you're done" —
+  with **NO "Not now"/decline option** (there's nothing the skill can do until they log in).
+  ("Not now" is only valid for an *optional* action when ALREADY logged in — e.g. "reach out? /
+  not now" from Home.)
 - **Name the specific friend** — *"**Jason** wants to meet,"* never *"someone."* Pull the
   name from the escalation / `check` / `list-connections`; don't make the owner guess who.
 - **One decision per message** — lead with the single most important thing; anything else
@@ -191,7 +211,7 @@ to read the conversation to know the outcome and what (if anything) to decide ne
 
 `brain-status` (online vs paused) · `pause` · `go-online` ·
 `owner-channel [--since N] [--message "<text>"]` ·
-`brain-pending` · `brain-resolve --request-id <id> [--action sent|handed_off|declined] [--message "<approved reply>"]` (action sent delivers the reply) ·
+`brain-pending` · `brain-resolve --request-id <id> [--action sent|handed_off|declined] [--message "<approved reply / decline wording>"]` (action `sent` delivers the reply; `declined` sends the friend a brief refusal — `--message` overrides the default) ·
 `brain-outreach --conversation <id> --message "<opener>"` ·
 `brain-interrupt --conversation <id>` ·
 plus `read` / `send` / `recall` / `remember`.

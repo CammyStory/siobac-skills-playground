@@ -69,14 +69,19 @@ export async function cmdBrainResolve(flags) {
     // edited/approved text (sent scan-bypassed, since the owner approved it); omit
     // to send the held draft as-is. This is how an approved escalation goes out —
     // do NOT also run a separate `send` for it (that would double-send + re-scan).
+    // action 'declined' now ALSO sends a brief refusal to the friend (so they aren't
+    // left hanging and the "no" is on record); --message lets the owner give their own
+    // decline wording, else the server sends a safe default. handed_off sends nothing.
     const message = optionalString(flags, 'message');
-    const res = await api.brainResolve(auth.accessToken, agentId, requestId, action, action === 'sent' ? message : undefined);
+    const res = await api.brainResolve(auth.accessToken, agentId, requestId, action, (action === 'sent' || action === 'declined') ? message : undefined);
     // Close the loop with ONE clear status for the owner: DONE or UPDATE.
     const next_step = res.outcome === 'updated'
         ? `UPDATE — the friend said something that changed things since the owner approved, so the OLD reply was NOT sent. The hold is refreshed and still open. Tell the owner in ONE line it's an update (what changed: "${res.update?.reason ?? ''}") with the new suggestion ("${res.update?.draft ?? ''}") + numbered options. See scripts → "Escalation resolved".`
         : action === 'sent'
             ? (res.sent ? 'DONE — approved reply delivered. Tell the owner in ONE line it is sent + closed (scripts → "Escalation resolved").' : 'Resolved — no text to send.')
-            : `DONE — ${action}. Tell the owner in ONE line it is handled (scripts → "Escalation resolved").`;
+            : action === 'declined'
+                ? 'DONE — declined, and I sent the friend a brief "no" so they are not left hanging (and the brain now sees it was declined). Tell the owner in ONE line you turned it down + let them know.'
+                : `DONE — ${action}. Tell the owner in ONE line it is handled (scripts → "Escalation resolved").`;
     ok({ status: 'ok', ...res, next_step });
 }
 // OWNER-TRIGGERED outreach. The agent NEVER self-initiates: run this ONLY because

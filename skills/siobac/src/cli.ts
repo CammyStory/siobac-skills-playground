@@ -1040,6 +1040,15 @@ async function cmdCheck(_flags: Record<string, string | true>) {
   if (auth && auth.agentId) {
     const inbox = await api.fetchInbox(auth.accessToken)
     result.inbound = { pending_requests: inbox.pending_requests, threads: inbox.threads, unread_count: inbox.new_messages.length }
+    // #8: the server's HELD-escalation queue (`brain-pending`) used to be invisible here,
+    // so escalations on OUTBOUND/connect conversations (e.g. the agent↔agent "keep going or
+    // wrap up?" checkpoint) never showed up in `check` — a platform that ran only `check`
+    // for "what's new" missed them entirely. Fold them in as `needs_you` so `check` is the
+    // SINGLE complete "what's new" surface (inbound AND outbound), no matter the platform.
+    try {
+      const bp = await api.brainPending(auth.accessToken, auth.agentId)
+      result.needs_you = bp.pending
+    } catch { result.needs_you = [] }
   } else {
     result.inbound = { note: 'not logged in — log in to see your conversations (Siobac is login-only)' }
   }
@@ -1055,7 +1064,7 @@ async function cmdCheck(_flags: Record<string, string | true>) {
   }
   result.outbound = outbound
   result.next_step = loggedIn
-    ? "One scan of everything needing the owner. In `inbound.threads`: `held: true` (has a `request_id`) = the server already escalated a reply for the owner's approval — surface it ONCE as \"needs your OK\" and resolve via `brain-pending`/`brain-resolve` (never also as a normal new message). `held: false` with `unread_count` > 0 = new messages the server is handling or that need a look — `read --conversation <connection_id>`. `inbound.pending_requests` = people asking to connect (approve/reject). `outbound[].new_messages` = replies on conversations the owner started. Give the owner ONE short digest in their language (by friend name, never raw ids/handles); if nothing is held/unread/pending, tell them their queue is clear."
+    ? "One scan of EVERYTHING needing the owner — `check` is now self-complete, you do NOT need a separate `brain-pending`. Order: (1) `needs_you` = escalations the server HELD for the owner's approval, on BOTH inbound AND OUTBOUND/connect conversations — including agent↔agent \"keep going or wrap up?\" checkpoints and any reach-out that needs a decision. Surface EACH once as \"needs your OK\" by friend (`friend`/`reason`), and resolve with `brain-resolve --request-id <request_id>` (sent/handed_off/declined). (2) `inbound.threads` with `held:true` is the SAME kind of escalation — if its `connId` matches a `needs_you` item, it's one event, surface ONCE (never also as a new message). (3) `held:false` + `unread_count`>0 = new messages to look at (`read --conversation <connection_id>`). (4) `inbound.pending_requests` = people asking to connect (approve/reject). (5) `outbound[].new_messages` = replies on conversations the owner started. Give ONE short digest in the owner's language (by friend name, never raw ids/handles); only if `needs_you` AND unread AND pending_requests are ALL empty is the queue clear."
     // LOGGED OUT: do NOT say "queue is clear" — inbound is invisible. Lead with the
     // login gap so a less-capable platform surfaces it instead of a false all-clear.
     : "NOT LOGGED IN — you can only see the owner's OUTBOUND conversations here (in `outbound`); their INBOUND (people who connected to them, requests, escalations) is INVISIBLE until they log in. Do NOT tell the owner their queue is clear. Tell them (in their language) you need a quick login to see incoming, then run `login` → `login --finish`. Still summarize anything in `outbound` if present."

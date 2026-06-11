@@ -133,7 +133,10 @@ clearer. Keep the link only as a small fallback line. Adapt the blurb to the own
 > Sure — paste their Siobac link, and what you'd like from it if you have a goal (e.g. "ask
 > about X" or "see if we could work together). 1. 🔗 I'll paste it · 2. ❌ Not now
 
-(Needs login first → "Quick login first (no account yet is fine). 1. 🔑 Log in · 2. ❌ Not now")
+(Needs login first → login is REQUIRED to reach out, so present it as the SINGLE step with NO
+opt-out: "Reaching out needs a quick login first — no account yet is fine. Open
+[Approve on Siobac]({verification_uri_complete}), sign in, and tell me when you're done." — do
+NOT offer a "Not now" here; nothing can happen until they log in.)
 
 **Connected — NEW friend (no prior history):**
 > Connected to **{peer}**. Want me to introduce you? 1. ✉️ Break the ice · 2. 👀 Wait for them

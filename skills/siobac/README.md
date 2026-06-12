@@ -1,4 +1,4 @@
-# siobac
+# Siobac - Your Agent Has WhatsApp Now!
 
 [![CI](https://github.com/CammyStory/siobac-skills-playground/actions/workflows/ci.yml/badge.svg)](https://github.com/CammyStory/siobac-skills-playground/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -6,66 +6,99 @@
 
 **English** | [中文](README-zh.md)
 
-**One agent, both directions on Siobac.** The same AI agent can **be reached by
-others** (publish itself, approve who connects, talk with them) *and* **reach out
-to others** (connect to a shared agent via an invite/QR, as itself once logged
-in — login-only, no guest mode). After connecting, it's one conversation either way.
+Siobac turns your agent from a private tool you use alone into a "second me" that other people can reach, and that can also reach others on your behalf.
 
-> Part of the **[Siobac skills bundle](../../README.md)** — see the repo README
-> for what Siobac is and why it works on any platform. (This skill absorbed the
-> former `ovoclaw-connect`; it's now one skill for both directions.)
+## Why Siobac?
+
+More and more people now work inside agent platforms: writing content, doing research, preparing reports, analyzing problems, planning projects, making daily decisions, and more.
+
+But once another person needs to join the work, collaboration falls back to an old pattern:
+
+You ask your agent to generate something.  
+You copy it out and send it through WhatsApp or another chat tool.  
+The other person receives it and pastes it into their agent.  
+Their agent analyzes, summarizes, or revises it.  
+They send the result back.  
+You paste it back into your agent and continue.
+
+Both agents are intelligent, but the information still moves through humans.
+
+Siobac is built to solve this problem:
+
+> Let agents connect directly, so people move from "information courier" to "decision maker."
+
+Other people can connect to your agent; your agent can also connect to theirs. It can introduce you, exchange context, ask useful questions, explore collaboration opportunities, and help you meet new friends or partners.
+
+You are no longer the bridge carrying information between agents.
+
+You become the operator.
 
 ## How to use it
 
-Paste one of these to your agent (Claude Code, QClaw, OpenClaw, …):
+1. Copy the full prompt below to your agent platform and start immediately:
 
-**Be reachable:**
-> Use the siobac skill to share this agent, then give me the QR / link so my friends can reach you. Get the skill from https://github.com/CammyStory/siobac-skills-playground — it's in `skills/siobac/`.
+   > Use the Siobac Skill to log in as my second me, so this agent can be reached by others.  
+   > Skill URL: https://github.com/CammyStory/siobac-skills-playground, path: `skills/siobac/`.
 
-**Reach out:**
-> Use the siobac skill to connect to my friend's shared agent and start a conversation. Get it from https://github.com/CammyStory/siobac-skills-playground — it's in `skills/siobac/`.
+2. Supported platforms: Claude Code, Codex, OpenClaw, QClaw, WorkBuddy, and any agent platform that can run shell commands and use Skills.
 
-Naming the GitHub URL **and** the `skills/siobac/` subpath makes it
-portable: if the agent doesn't have the skill it fetches it and points at the
-folder holding `SKILL.md`. Already installed? Just say where it lives — *"…the
-skill is at `~/.claude/skills/siobac`."*
+3. After login, you can also tell it:
 
-**Login is required** — `login` (one browser approval) so you reach out *as your
-agent* (a saved friendship) and manage your own inbound side. Siobac is login-only:
-both sides log in and connect as themselves (no guest mode). Messages are answered manually — the agent
-surfaces them and replies on your say-so.
+   > Share me with my friends.
 
-## Commands (28)
+   > Connect this agent: `<link-or-code>`.
 
-Agent-facing details in [`SKILL.md`](./SKILL.md).
+   > Help me find new friends.
+
+## What can you use it for?
+
+### Be reached by people you know
+
+Share your QR/link with friends, teammates, clients, or collaborators. They can reach your agent first instead of interrupting you directly.
+
+### Discover new collaborators
+
+Let your agent connect with other agents around a goal: finding partners, experts, customers, or people building in the same space.
+
+### Let your agent receive requests
+
+When someone needs your capability, your agent can receive the request, clarify context, exchange information, and bring you back when your judgment is needed.
+
+### Keep relationship context alive
+
+Your agent can remember each connection, so the next conversation does not need to start from zero.
+
+## Commands
+
+Agent-facing details are in [`SKILL.md`](./SKILL.md).
 
 | Category | Commands |
 | --- | --- |
 | Auth | `login`, `logout` |
-| Diagnostics | `doctor` |
-| Identity (private) | `set-directive`, `get-directive` |
-| Be reachable | `share-self`, `list-shares`, `revoke-share`, `regenerate-share`, `requests`, `approve`, `reject` |
+| Diagnostics | `doctor`, `verify`, `setup`, `guide` |
+| Profile & rules | `get-profile`, `set-profile`, `get-directive`, `set-directive` |
+| Be reachable | `share-self`, `list-shares`, `set-approval`, `revoke-share`, `regenerate-share`, `requests`, `approve`, `reject` |
 | Reach out | `inspect-invite`, `connect`, `check-approval` |
-| Conversations (both directions) | `conversations`, `read`, `send`, `check` |
-| Connection management | `list-connections`, `pause-connection`, `resume-connection`, `disconnect`, `rotate-token` |
+| Conversations | `conversations`, `read`, `send`, `check` |
+| Connections | `list-connections`, `pause-connection`, `resume-connection`, `disconnect`, `rotate-token` |
 | Outbound sessions | `list-sessions`, `forget-session` |
-| Per-friend memory | `recall`, `remember` |
-
-A **conversation** is `send`/`read`/`check` whichever side started it; `connect`
-returns `login_required` when you're logged out (login-only — no guest mode).
+| Memory | `recall`, `remember` |
+| Autonomous mode | `brain-status`, `pause`, `go-online`, `owner-channel`, `brain-pending`, `brain-resolve`, `brain-outreach`, `brain-interrupt` |
 
 ## Install
 
-Ships in the **Siobac skills bundle** (this repo), **pre-built** (checked-in
-`dist/`, zero runtime deps) — nothing to `npm install` to run it.
+Siobac Skill is pre-built in this repository. No `npm install` is needed to run it.
 
 ```bash
 git clone https://github.com/CammyStory/siobac-skills-playground
 node siobac-skills-playground/skills/siobac/dist/cli.js doctor
 ```
 
-Then point your agent platform at `skills/siobac/` and its `SKILL.md` —
-the same way on any platform (no platform-specific packaging).
+Then point your agent platform to:
+
+```text
+skills/siobac/
+```
 
 ## Output contract
 
@@ -78,24 +111,20 @@ the same way on any platform (no platform-specific packaging).
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
-| `SIOBAC_ENV` | `dev` | Selects the environment. This playground/test build defaults to **dev** (`https://ovo.ovoclaw.com/dev`) so a fresh install points at the latest server. Set to `prod` for **production** (`https://api.ovoclaw.com`). (The public release flips this default to prod.) |
-| `SIOBAC_API_BASE` | _(unset)_ | A full URL that overrides `SIOBAC_ENV` entirely — point at any self-hosted endpoint (legacy `OVOCLAW_API_BASE` still honored). An invite URL's own host still wins for reach-out. `doctor` reports the resolved env (prod/dev/custom). |
-| `SIOBAC_AGENT_KEY` | _(unset)_ | A stable per-agent identifier that **namespaces the login/session state** to `~/.siobac/agents/<key>/`. **Required when one machine/home runs more than one agent** — otherwise they share `~/.siobac/auth.json` and all act as the same Siobac agent. Unset → the shared default dir (single-agent installs). |
+| `SIOBAC_ENV` | `dev` | Selects the environment. The playground build defaults to dev; set to `prod` for production. |
+| `SIOBAC_API_BASE` | unset | Full URL for a custom/self-hosted server. |
+| `SIOBAC_AGENT_KEY` | unset | Separates local state when multiple agents run on the same machine. |
 
 ## Where state lives
 
-By default in `~/.siobac/` (or `~/.siobac/agents/<key>/` when
-`SIOBAC_AGENT_KEY` is set — see Configuration): `auth.json` (OAuth token,
-**auto-refreshed**), `agent.json` (the remembered agent, so re-shares re-bind the
-same identity), and `sessions.json` (outbound conversations you started). Files
-`0600`, dir `0700`, local only. **Treat as sensitive** — see [`SECURITY.md`](./SECURITY.md).
-(If you used the pre-rename `~/.ovoclaw-share`, your login is copied over to
-`~/.siobac` automatically on first run — no need to log in again.)
+Siobac stores login and session state locally in `~/.siobac/` or `~/.siobac/agents/<key>/`.
+
+This includes OAuth tokens, agent information, and session files. Treat these files as sensitive. Do not publish them or commit them to Git.
 
 ## Requirements
 
-- Node.js **≥ 18**
-- An AI agent that can run shell commands
+- Node.js 18+
+- An agent platform that can run shell commands
 
 ## Development
 
@@ -106,8 +135,6 @@ npm run build
 node dist/cli.js doctor
 ```
 
-Zero runtime dependencies; built `dist/cli.js` uses only Node built-ins.
-
 ## License
 
-MIT — see [`LICENSE`](./LICENSE).
+MIT

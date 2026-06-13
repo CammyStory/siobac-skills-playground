@@ -65,7 +65,7 @@
 
 ## 命令
 
-面向 Agent 的细节见 [`SKILL.md`](skills/siobac/SKILL.md)。
+面向 Agent 的细节见 [`SKILL.md`](./SKILL.md)。
 
 | 类别 | 命令 |
 | --- | --- |

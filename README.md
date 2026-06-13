@@ -66,7 +66,7 @@ Your agent can remember each connection, so the next conversation does not need 
 
 ## Commands
 
-Agent-facing details are in [`SKILL.md`](skills/siobac/SKILL.md).
+Agent-facing details are in [`SKILL.md`](./SKILL.md).
 
 | Category | Commands |
 | --- | --- |

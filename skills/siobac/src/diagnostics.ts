@@ -6,8 +6,7 @@ import * as api from './api.js'
 import {
   stateDir, authFilePath, ensureAgentBinding, loadAuth, saveAuth, clearAuth,
   loadBoundAgent, saveBoundAgent, savePendingLogin, loadPendingLogin, clearPendingLogin,
-  isAuthFileWriteable, saveSession, getSession, listSessions, deleteSession, updateSession,
-  newSessionHandle, migrateLegacyState, type AgentBinding, type AuthState,
+  isAuthFileWriteable, migrateLegacyState, type AgentBinding, type AuthState,
 } from './state.js'
 import { SKILL_NAME, SKILL_VERSION } from './version.js'
 import { ok, withUpdateNotice, skillDir, updateInstruction, requireBoundAgent, shareUrlFor, verifyShareResolves } from './runtime.js'
@@ -242,22 +241,8 @@ export async function cmdVerify(_flags: Record<string, string | true>) {
     }
   }
 
-  // 6. Outbound conversation tokens still work (each is a separate per-connection
-  //    bearer that can expire/revoke). Warn on any dead one; not fatal overall.
-  const sessions = await listSessions()
-  if (sessions.length) {
-    const dead: string[] = []
-    for (const s of sessions) {
-      try { await api.pollConnectionReplies(s.host, s.token, s.lastSeq, 0) }
-      catch { dead.push(s.handle) }
-    }
-    checks.outbound_sessions = {
-      ok: true,
-      asserted: 'each outbound conversation token still works',
-      value: { total: sessions.length, working: sessions.length - dead.length, dead },
-      warning: dead.length ? `${dead.length} outbound conversation(s) no longer reachable (expired/revoked token): ${dead.join(', ')} — \`forget-session\` or reconnect` : undefined,
-    }
-  }
+  // (Outbound conversations are served server-side under the owner's login now — no
+  //  per-connection tokens to health-check; `conversations` / `check` read them live.)
 
   const allOk = Object.values(checks).every((c) => c.ok)
   const warnings = Object.entries(checks).filter(([, c]) => c.warning).map(([k, c]) => `${k}: ${c.warning}`)

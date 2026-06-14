@@ -465,6 +465,30 @@ export async function pollConnectionReplies(host, token, sinceSeq, waitSeconds =
         params.set('full', '1'); // whole-conversation read (both directions)
     return inviteFetch(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
 }
+export async function listOutbound(bearer) {
+    return jsonFetch({ method: 'GET', path: '/agents/outbound', bearer });
+}
+export async function readOutbound(bearer, connectionId, opts = {}) {
+    const params = new URLSearchParams();
+    if (opts.since !== undefined)
+        params.set('since', String(opts.since));
+    if (opts.limit !== undefined)
+        params.set('limit', String(opts.limit));
+    const qs = params.toString();
+    return jsonFetch({
+        method: 'GET',
+        path: `/agents/outbound/${encodeURIComponent(connectionId)}/conversation${qs ? `?${qs}` : ''}`,
+        bearer,
+    });
+}
+export async function sendOutbound(bearer, connectionId, content) {
+    return jsonFetch({
+        method: 'POST',
+        path: `/agents/outbound/${encodeURIComponent(connectionId)}/message`,
+        bearer,
+        body: { content },
+    });
+}
 export async function brainOwnerChannelRead(bearer, agentId, since = 0) {
     return jsonFetch({ method: 'GET', path: `/agents/${encodeURIComponent(agentId)}/owner-channel?since=${since}`, bearer });
 }

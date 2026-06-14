@@ -27,16 +27,9 @@ import {
   resolvedAgentKey,
   pinAgentKey,
   isAuthFileWriteable,
-  saveSession,
-  getSession,
-  listSessions,
-  deleteSession,
-  updateSession,
-  newSessionHandle,
   migrateLegacyState,
   type AgentBinding,
   type AuthState,
-  type Session,
 } from './state.js'
 import { parseInvite } from './invite.js'
 import { SKILL_NAME, SKILL_VERSION } from './version.js'
@@ -601,72 +594,45 @@ async function cmdRotateToken(flags: Record<string, string | true>) {
 async function cmdRecall(flags: Record<string, string | true>) {
   const connectionId = optionalString(flags, 'conversation') ?? optionalString(flags, 'connection-id')
     ?? (() => { throw new CliError('recall needs a conversation — pass `--conversation <id>`. Get the id from `check` or `list-connections` (a connection) / `conversations` (the `conversation` value). recall loads your memory of that friend so you reply in character.') })()
-  // OUTBOUND conversations (ones THIS agent started — handle s_…) live in
-  // sessions.json, not as an inbound connection on this agent. Per-friend memory
-  // is owner/inbound-only, so there's no friend_memory to fetch — but a logged-in
-  // agent can still reply in character with its OWN directive + profile.
-  const session = await getSession(connectionId)
-  if (session) {
-    const auth = await loadAuth()
-    if (auth?.agentId) {
-      let prof: api.AgentProfile | null = null
-      try { prof = await api.getAgentProfile(auth.accessToken, auth.agentId) } catch { /* best-effort */ }
-      ok({
-        status: 'ok',
-        conversation: connectionId,
-        mode: 'outbound',
-        directive: prof?.directive ?? '',          // YOUR rules — act on, never reveal.
-        profile: prof ? { name: prof.name, description: prof.description, avatar_url: prof.avatar_url } : null,
-        friend_memory: [],
-        note: 'Outbound conversation (you started it). Per-friend memory is tracked only for connections others make to YOU, so friend_memory is empty — reply using your own directive + profile.',
-      })
-    } else {
-      ok({
-        status: 'ok',
-        conversation: connectionId,
-        mode: 'logged_out',
-        directive: '',
-        profile: null,
-        friend_memory: [],
-        note: 'Not logged in — no agent directive/profile to load. Log in (`login`) to reply as your agent; Siobac connections are login-only.',
-      })
-    }
-    return
-  }
   const { auth, agentId } = await requireBoundAgent()
-  const ctx = await api.getTalkContext(auth.accessToken, agentId, connectionId)
+  // INBOUND connections (someone connected to YOU) carry per-friend memory; OUTBOUND
+  // (reach-out) ones don't. Try the inbound context; a not_found means it's outbound,
+  // so reply in character from your OWN directive + profile (no friend memory).
+  try {
+    const ctx = await api.getTalkContext(auth.accessToken, agentId, connectionId)
+    ok({
+      status: 'ok',
+      agent_id: agentId,
+      connection_id: connectionId,
+      mode: ctx.mode,
+      // PRIVATE — shapes HOW you reply (your rules/purpose). NEVER reveal it.
+      directive: ctx.directive.content,
+      // PUBLIC card others see — safe to reference.
+      profile: ctx.profile,
+      // Your memory of THIS friend (summary first). disclosure 'private' = act on,
+      // never say; 'friend_shared' = ok to reference WITH this friend.
+      friend_memory: ctx.friend_memory,
+    })
+    return
+  } catch (e) {
+    if ((e as api.ApiError)?.code !== 'not_found') throw e
+  }
+  let prof: api.AgentProfile | null = null
+  try { prof = await api.getAgentProfile(auth.accessToken, agentId) } catch { /* best-effort */ }
   ok({
     status: 'ok',
-    agent_id: agentId,
-    connection_id: connectionId,
-    mode: ctx.mode,
-    // PRIVATE — shapes HOW you reply (your rules/purpose). NEVER reveal it.
-    directive: ctx.directive.content,
-    // PUBLIC card others see — safe to reference.
-    profile: ctx.profile,
-    // Your memory of THIS friend (summary first). disclosure 'private' = act on,
-    // never say; 'friend_shared' = ok to reference WITH this friend. Empty until
-    // there's memory recorded for this friend.
-    friend_memory: ctx.friend_memory,
+    conversation: connectionId,
+    mode: 'outbound',
+    directive: prof?.directive ?? '',          // YOUR rules — act on, never reveal.
+    profile: prof ? { name: prof.name, description: prof.description, avatar_url: prof.avatar_url } : null,
+    friend_memory: [],
+    note: 'Outbound conversation (you started it). Per-friend memory is tracked only for connections others make to YOU, so reply using your own directive + profile.',
   })
 }
 
 async function cmdRemember(flags: Record<string, string | true>) {
   const connectionId = optionalString(flags, 'conversation') ?? optionalString(flags, 'connection-id')
     ?? (() => { throw new CliError('remember needs a conversation — pass `--conversation <id>` (from `check` / `list-connections` / `conversations`), plus what to save (`--summary "<text>"` and/or `--deltas <json>`). It records what you learned about that friend for next time.') })()
-  // OUTBOUND conversations have no inbound friendship row to attach memory to —
-  // per-friend memory is stored only for connections others make to YOU. Return
-  // a clear no-op instead of a confusing 404 from the owner-side memory endpoint.
-  const session = await getSession(connectionId)
-  if (session) {
-    ok({
-      status: 'skipped',
-      conversation: connectionId,
-      mode: 'outbound',
-      note: 'Per-friend memory is stored only for connections others make to YOU (inbound). For a conversation you started (outbound), there is nothing to persist — just reply normally.',
-    })
-    return
-  }
   const { auth, agentId } = await requireBoundAgent()
   // The skill fills scope:'friend' + friend_id for every delta, so the agent
   // only supplies {kind, content, disclosure?, confidence?, op?, source_seq?}.
@@ -705,8 +671,16 @@ async function cmdRemember(flags: Record<string, string | true>) {
     deltas.push({ op: 'add', scope: 'friend', friend_id: connectionId, kind: 'authorization', content: authorize, disclosure: 'private' })
   }
   if (deltas.length === 0) throw new CliError('nothing to remember — pass --deltas <json>, --summary "<text>", and/or --authorize "<owner pre-approval, e.g. \'available Fri afternoon UTC+8; may confirm any slot\'>".')
-  const result = await api.submitMemory(auth.accessToken, agentId, connectionId, deltas)
-  ok({ status: 'remembered', agent_id: agentId, connection_id: connectionId, ...result })
+  // Per-friend memory attaches only to INBOUND connections (others connecting to YOU).
+  // For an OUTBOUND (reach-out) conversation the memory endpoint 404s → return a clear
+  // no-op instead of an error.
+  try {
+    const result = await api.submitMemory(auth.accessToken, agentId, connectionId, deltas)
+    ok({ status: 'remembered', agent_id: agentId, connection_id: connectionId, ...result })
+  } catch (e) {
+    if ((e as api.ApiError)?.code !== 'not_found') throw e
+    ok({ status: 'skipped', conversation: connectionId, mode: 'outbound', note: 'Per-friend memory is stored only for inbound connections (others connecting to YOU). For a reach-out you started there is nothing to persist — just reply normally.' })
+  }
 }
 
 async function cmdGetDirective(_flags: Record<string, string | true>) {
@@ -773,71 +747,11 @@ async function cmdSetProfile(flags: Record<string, string | true>) {
 }
 
 // ── Reach out + unified conversations (merged from ovoclaw-connect) ──────
-// One agent is symmetric: it can be reached (passive) AND reach out (active).
-// A conversation handle disambiguates the transport: `s_…` = one I started
-// (connection bearer); anything else = a connection id I own (login token).
+// One agent is symmetric: it can be reached (passive) AND reach out (active). Both
+// directions are now server-side under the owner's login, keyed by connection_id — no
+// local sessions, no rotating connection token, no silent reauth. read/send try the
+// OUTBOUND endpoint first, then INBOUND (each id matches exactly one side).
 
-function isActiveHandle(h: string): boolean { return /^s_[0-9a-f]{16}$/.test(h) }
-
-// Active-handle connection tokens (`xext_…`) rotate on a short server TTL (~1h);
-// the connection/conversation itself is PERMANENT. On a 401 `session_expired` we
-// silently re-mint the token with the saved `client_secret` (the documented
-// Step-4 refresh — same shadow user, same conversation, no owner approval) and
-// retry the op ONCE, so the agent never sees an "expiry". The refreshed token is
-// persisted AND written back onto the in-memory `sess` so a caller looping over
-// the session (e.g. paged `read`) picks it up on the next iteration. Only if the
-// reauth itself can't mint a fresh token (secret revoked, connection gone) does
-// the ORIGINAL 401 surface — its message already guides re-connect / re-login.
-async function withSessionReauth<T>(sess: Session, op: (token: string) => Promise<T>): Promise<T> {
-  try {
-    return await op(sess.token)
-  } catch (e) {
-    if ((e as api.ApiError)?.code !== 'session_expired') throw e
-    const re = await api.connectToInvite(sess.host, sess.slug, {
-      // The reauth path keys on (client_user_id, client_secret) and ignores the
-      // introduction — but the connect endpoint still requires it (min length 1),
-      // so send a short placeholder rather than an empty string.
-      introduction: '(token refresh)',
-      client_user_id: sess.clientUserId,
-      client_secret: sess.clientSecret,
-    })
-    if (re.status !== 'reauthorized' || !re.token) throw e
-    sess.token = re.token
-    if (re.token_expires_at) sess.tokenExpiresAt = re.token_expires_at
-    await updateSession(sess.handle, {
-      token: re.token,
-      tokenExpiresAt: re.token_expires_at ?? sess.tokenExpiresAt,
-      conversationId: re.conversation_id ?? sess.conversationId,
-    })
-    return await op(re.token)
-  }
-}
-
-async function persistSession(res: api.ConnectResponse, slug: string, host: string): Promise<string> {
-  if (!res.token || !res.token_expires_at || !res.your_user_id || !res.client_secret) {
-    throw new CliError(`connect succeeded but the response is missing token fields (status ${res.status}).`)
-  }
-  // Stable conversation identity: if the server handed back a conversation we
-  // already have locally (the SAME registered friendship — reconnect, re-login,
-  // or a token re-mint all return the same conversation_id), REUSE that handle
-  // instead of minting a new one. This keeps "same agent → same conversation"
-  // and preserves lastSeq so history isn't re-read as new. Secondary fallback:
-  // an existing session on the same invite slug.
-  const prior = res.conversation_id
-    ? (await listSessions()).find((s) => s.conversationId === res.conversation_id)
-    : undefined
-  const handle = prior?.handle ?? newSessionHandle()
-  await saveSession({
-    handle, slug, host,
-    peerAgentName: res.peer_name ?? prior?.peerAgentName,
-    token: res.token, tokenExpiresAt: res.token_expires_at,
-    clientUserId: res.your_user_id, clientSecret: res.client_secret,
-    conversationId: res.conversation_id,
-    lastSeq: prior?.lastSeq ?? 0,
-    createdAt: prior?.createdAt ?? new Date().toISOString(),
-  })
-  return handle
-}
 function sanitizeConnect(res: api.ConnectResponse): Record<string, unknown> {
   const { token: _t, client_secret: _cs, ...safe } = res
   return safe as Record<string, unknown>
@@ -916,7 +830,9 @@ async function cmdConnect(flags: Record<string, string | true>) {
       if (m?.agent?.name && !res.peer_name) res.peer_name = m.agent.name
       peerDescription = m?.agent?.description ?? null
     }
-    const handle = await persistSession(res, slug, host)
+    // The connection_id IS the handle now (the connect response returns it as
+    // request_id) — no local session to persist. read/send route by it under OAuth.
+    const handle = res.request_id ?? ''
     const who = res.peer_name
       ? `${res.peer_name}${peerDescription ? ` (${peerDescription})` : ''}`
       : 'them'
@@ -937,8 +853,7 @@ async function cmdCheckApproval(flags: Record<string, string | true>) {
   const { slug, host } = parseInvite(invite)
   const res = await api.pollConnect(host, slug, requestId)
   if (res.status === 'active') {
-    const handle = await persistSession(res, slug, host)
-    ok({ status: 'active', conversation: handle, peer_name: res.peer_name ?? null, token_expires_at: res.token_expires_at })
+    ok({ status: 'active', conversation: res.request_id ?? '', peer_name: res.peer_name ?? null, token_expires_at: res.token_expires_at })
   }
   ok(sanitizeConnect(res))
 }
@@ -952,22 +867,16 @@ async function cmdConversations(_flags: Record<string, string | true>) {
       conversations.push({ conversation: c.id, direction: 'inbound', started: 'they connected to me', peer: c.shadow_name ?? null, status: c.status, conversation_id: c.conversation_id, created_at: c.created_at })
     }
   }
-  // Collapse outbound sessions to ONE per peer. Reconnecting to a friend (or the
-  // ~hourly token re-auth) writes a NEW session row each time, so the raw list
-  // balloons — a real run showed 8 stale rows for a single friend. Keep only the
-  // FRESHEST session per peer (by createdAt); the older/expired duplicates are
-  // dropped. A still-expired freshest is kept (the connection re-auths on use) but
-  // flagged needs_reauth so it's not mistaken for a dead thread.
-  const freshestByPeer = new Map<string, Session>()
-  for (const s of await listSessions()) {
-    const key = s.peerAgentName || s.slug || s.handle   // group by FRIEND, not by session/slug
-    const cur = freshestByPeer.get(key)
-    if (!cur || new Date(s.createdAt).getTime() > new Date(cur.createdAt).getTime()) freshestByPeer.set(key, s)
-  }
-  const outbound = [...freshestByPeer.values()].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-  for (const s of outbound) {
-    const expired = !!s.tokenExpiresAt && new Date(s.tokenExpiresAt).getTime() < Date.now()
-    conversations.push({ conversation: s.handle, direction: 'outbound', started: 'I connected out', peer: s.peerAgentName ?? null, slug: s.slug, host: s.host, created_at: s.createdAt, token_expires_at: s.tokenExpiresAt, ...(expired ? { needs_reauth: true } : {}) })
+  // OUTBOUND (reach-out) conversations now live SERVER-side under the owner's login —
+  // one row per friendship (no local sessions, no rotating-token churn, no stale
+  // duplicates). The connection_id is the handle for read/send.
+  if (auth && auth.agentId) {
+    try {
+      const ob = await api.listOutbound(auth.accessToken)
+      for (const o of ob.connections) {
+        conversations.push({ conversation: o.connection_id, direction: 'outbound', started: 'I connected out', peer: o.peer_name ?? null, status: o.status, conversation_id: o.conversation_id, new_count: o.new_count, created_at: o.created_at })
+      }
+    } catch { /* outbound is optional in the list */ }
   }
   const loggedIn = !!(auth && auth.agentId)
   ok({
@@ -981,50 +890,26 @@ async function cmdConversations(_flags: Record<string, string | true>) {
 
 async function cmdRead(flags: Record<string, string | true>) {
   const handle = requireString(flags, 'conversation', 'read')
-  if (isActiveHandle(handle)) {
-    const sess = await getSession(handle)
-    if (!sess) throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`)
-    const sinceFlag = optionalNonNegInt(flags, 'since')
-    if (sinceFlag !== undefined) {
-      // Explicit forward page from <since> (the server's /poll returns one capped
-      // window of messages with seq > since, oldest-first).
-      const res = await withSessionReauth(sess, (tok) => api.pollConnectionReplies(sess.host, tok, sinceFlag, 0, /* full */ true))
-      const earliest = res.messages[0]?.seq
-      ok({
-        status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null,
-        messages: res.messages, last_seq: res.last_seq, has_more_before: typeof earliest === 'number' && earliest > 1,
-        next_step: 'Forward page from `--since` (both directions; `outbound` = the owner\'s own). Show the owner BOTH sides — what the FRIEND said AND what your agent REPLIED — so it reads as a real back-and-forth; never just the inbound half. Render it readably in their language (who said what), not raw JSON or the handle. Page again with the returned `last_seq`. To reply, `send --conversation ' + handle + ' --message "<text>"`.',
-      })
-    }
-    // Default: the server caps each /poll window and reports `last_seq` as the
-    // window's max (NOT the conversation's), so a single poll from 0 returns the
-    // OLDEST window. Page forward to the end, then show the most RECENT window so
-    // `read` shows recent messages on a long conversation.
-    const bySeq = new Map<number, api.ReplyMessage>()
-    let cursor = 0
-    for (let guard = 0; guard < 20; guard++) {
-      const r = await withSessionReauth(sess, (tok) => api.pollConnectionReplies(sess.host, tok, cursor, 0, true))
-      if (!r.messages.length) break
-      for (const m of r.messages) bySeq.set(m.seq, m)
-      if (r.last_seq <= cursor) break
-      cursor = r.last_seq
-    }
-    const all = [...bySeq.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
-    const recent = all.slice(-50)
-    const earliest = recent[0]?.seq
-    ok({
-      status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null,
-      messages: recent, last_seq: all.length ? all[all.length - 1].seq : 0,
-      has_more_before: typeof earliest === 'number' && earliest > 1,
-      next_step: 'Most recent window (both directions; `outbound` = the owner\'s own). When the owner opens a thread, show BOTH sides of the exchange — what the FRIEND said AND what your agent REPLIED on their behalf — so the meaning is clear in context; never show only the friend\'s half. Render it readably in their language (who said what), not raw JSON or the handle. If `has_more_before`, older messages exist (page with `--since <seq>`). To reply, `send --conversation ' + handle + ' --message "<text>"` (the server usually auto-replies when online, so only send if the owner wants to).',
-    })
-  }
   const { auth, agentId } = await requireBoundAgent()
   const since = optionalNonNegInt(flags, 'since')
+  // A connection_id is EITHER the owner's outbound (reach-out) OR inbound. Try outbound
+  // first under our login; a not_found means it's an inbound connection on this agent.
+  try {
+    const hist = await api.readOutbound(auth.accessToken, handle, { since, limit: 200 })
+    ok({
+      status: 'ok', conversation: handle, direction: 'outbound',
+      conversation_id: hist.conversation_id, message_count: hist.messages.length,
+      last_seq: hist.last_seq, has_more: hist.has_more, messages: hist.messages,
+      next_step: 'Messages on a conversation the owner STARTED (both directions; `outbound` = the owner\'s own agent). Show the owner BOTH sides — what the friend said AND what your agent said on their behalf — readably in their language; never just one half, never raw JSON/handles. To add a line yourself: `send --conversation ' + handle + ' --message "<text>"` (the agents usually handle first contact on their own).',
+    })
+    return
+  } catch (e) {
+    if ((e as api.ApiError)?.code !== 'not_found') throw e
+  }
   const hist = await api.readConversation(auth.accessToken, agentId, handle, { since })
   ok({
     status: 'ok', conversation: handle, direction: 'inbound', conversation_id: hist.conversation_id, message_count: hist.messages.length, last_seq: hist.last_seq, has_more: hist.has_more, messages: hist.messages,
-    next_step: 'Messages in this inbound conversation. Summarize for the owner in their language — never echo raw messages or ids. The server usually auto-replies when online; only `send --conversation ' + handle + ' --message "<text>"` if the owner wants to reply manually (it confirms first).',
+    next_step: 'Messages in this inbound conversation. Summarize for the owner in their language — never echo raw messages or ids. The server usually auto-replies on first contact; only `send --conversation ' + handle + ' --message "<text>"` if the owner wants to reply manually (it confirms first).',
   })
 }
 
@@ -1042,55 +927,42 @@ async function cmdSend(flags: Record<string, string | true>) {
       `send --conversation ${handle} --message "<the confirmed text>" --confirmed`,
     )
   }
-  if (isActiveHandle(handle)) {
-    const sess = await getSession(handle)
-    if (!sess) throw new CliError(`Unknown conversation "${handle}". Run \`conversations\` to list, or \`connect\` first.`)
-    const res = await withSessionReauth(sess, (tok) => api.sendToConnection(sess.host, tok, message))
-    // Server backstop: even on a direct/outbound send, the server HOLDS anything that looks
-    // like it would share private info and escalates it — surface that (NOT as a failure).
-    if ((res as { held?: boolean; status?: string }).held || (res as { status?: string }).status === 'held') {
-      const kind = (res as { kind?: string }).kind
-      ok({
-        status: 'held_for_review', conversation: handle, direction: 'outbound', kind,
-        next_step: `The server HELD this — it looked like it would share ${kind ?? 'sensitive info'} — and escalated it to the owner; it was NOT sent. Tell the owner (in their language) you held it because it looks like it shares ${kind ?? 'private info'}, and offer: send as-is / edit / skip. See it via \`brain-pending\`; if they approve, deliver with \`brain-resolve --action sent --message "<approved text>"\` (do not retry \`send\`).`,
-      })
-    }
-    // Assert the server actually persisted it (assigned a seq + id) before
-    // reporting "sent" — a 200 with no seq means it did NOT land.
-    const persisted = typeof res.message?.seq === 'number' && !!res.message?.id
-    ok({
-      status: persisted ? 'sent' : 'send_unconfirmed',
-      conversation: handle, direction: 'outbound',
-      message_id: res.message?.id, seq: res.message?.seq, reply_status: res.reply_status,
-      verified: { persisted, seq: res.message?.seq ?? null },
-      next_step: persisted
-        ? `Delivered. Tell the owner (in their language) you'll talk with their friend's agent to move things along — it runs on its own and takes a little time, and you'll surface anything worth their attention. Offer quick options like "What's new?" / "Back home" — do NOT nag them to "check for a reply".`
-        : `The send returned WITHOUT a sequence number — it may NOT have been delivered. Do NOT tell the owner it sent; re-\`read --conversation ${handle}\` to confirm before retrying.`,
-    })
-  }
   const { auth, agentId } = await requireBoundAgent()
-  const res = await api.postReply(auth.accessToken, agentId, handle, message)
-  // The server HOLDS a reply that looks like it would disclose sensitive info — it
-  // escalates to the owner instead of sending. Surface that clearly (NOT as a fail).
-  if ((res as { status?: string }).status === 'blocked') {
-    const kind = (res as { kind?: string }).kind
-    ok({
-      status: 'held_for_review', conversation: handle, direction: 'inbound', kind,
-      next_step: `This message looked like it would share ${kind ?? 'sensitive info'}, so the server HELD it and escalated it to the owner — it was NOT sent. Tell the owner (in their language) you held it because it looks like it shares ${kind ?? 'private info'}, and offer: send as-is / edit / skip. See it via \`brain-pending\`; if they approve, deliver with \`brain-resolve --action sent --message "<approved text>"\` (do not retry \`send\`).`,
-    })
+  // A connection_id is EITHER the owner's outbound (reach-out) OR inbound. Try outbound
+  // first under our login; not_found → it's an inbound connection on this agent.
+  let direction: 'outbound' | 'inbound' = 'outbound'
+  let res: any
+  try {
+    res = await api.sendOutbound(auth.accessToken, handle, message)
+  } catch (e) {
+    if ((e as api.ApiError)?.code !== 'not_found') throw e
+    direction = 'inbound'
+    res = await api.postReply(auth.accessToken, agentId, handle, message)
   }
-  // Assert persistence: the server returns the assigned seq + message_id only
-  // when the reply actually landed in the conversation.
-  const persisted = typeof res.seq === 'number' && !!res.message_id
+  // The server HOLDS anything that looks like it would disclose sensitive info and
+  // escalates it instead of sending — surface that clearly (NOT as a failure). Both
+  // paths report it as status 'blocked'/'held'.
+  if (res?.status === 'blocked' || res?.status === 'held' || res?.held) {
+    const kind = res?.kind as string | undefined
+    ok({
+      status: 'held_for_review', conversation: handle, direction, kind,
+      next_step: `The server HELD this — it looked like it would share ${kind ?? 'sensitive info'} — and escalated it to the owner; it was NOT sent. Tell the owner (in their language) you held it because it looks like it shares ${kind ?? 'private info'}, and offer: send as-is / edit / skip. See it via \`brain-pending\`; if they approve, deliver with \`brain-resolve --action sent --message "<approved text>"\` (do not retry \`send\`).`,
+    })
+    return
+  }
+  // Persistence: outbound returns res.message.{seq,id}; inbound returns res.{seq,message_id}.
+  const seq = direction === 'outbound' ? res?.message?.seq : res?.seq
+  const messageId = direction === 'outbound' ? res?.message?.id : res?.message_id
+  const persisted = typeof seq === 'number' && !!messageId
   ok({
     status: persisted ? 'sent' : 'send_unconfirmed',
-    conversation: handle, direction: 'inbound', ...res,
-    verified: { persisted, seq: res.seq ?? null },
-    // Manual send (owner paused/offline, or hand-writing this one). Autonomous
-    // replying is the brain's job when online, not a per-send toggle.
+    conversation: handle, direction, message_id: messageId, seq, reply_status: res?.reply_status,
+    verified: { persisted, seq: seq ?? null },
     next_step: persisted
-      ? `Sent (server confirmed seq ${res.seq}). Persist anything worth keeping with \`remember --conversation ${handle}\`. (Autonomous follow-up is the brain's job — you don't turn anything on here.)`
-      : `The send did NOT come back with a sequence number — it may not have landed. Do NOT tell the owner it sent; \`read --conversation ${handle}\` to confirm, then retry if missing.`,
+      ? (direction === 'outbound'
+          ? `Delivered. Tell the owner (in their language) you'll talk with their friend's agent to move things along — it runs on its own; you'll surface anything worth their attention. Offer "What's new?" / "Back home" — do NOT nag them to "check for a reply".`
+          : `Sent (server confirmed seq ${seq}). Persist anything worth keeping with \`remember --conversation ${handle}\`. (Autonomous follow-up is the brain's job.)`)
+      : `The send returned WITHOUT a sequence number — it may NOT have landed. Do NOT tell the owner it sent; \`read --conversation ${handle}\` to confirm before retrying.`,
   })
 }
 
@@ -1133,17 +1005,20 @@ async function cmdCheck(_flags: Record<string, string | true>) {
   }
   const loggedIn = !!(auth && auth.agentId)
   result.logged_in = loggedIn
+  // OUTBOUND (reach-out): new replies on conversations the owner started, served under
+  // their login (server tracks the read-cursor — no local sessions). new_count>0 = unread.
   const outbound: Array<Record<string, unknown>> = []
-  for (const s of await listSessions()) {
+  if (loggedIn) {
     try {
-      const res = await withSessionReauth(s, (tok) => api.pollConnectionReplies(s.host, tok, s.lastSeq, 0))
-      if (res.last_seq > s.lastSeq) await updateSession(s.handle, { lastSeq: res.last_seq })
-      if (res.messages.length) outbound.push({ conversation: s.handle, peer: s.peerAgentName ?? null, new_messages: res.messages, last_seq: res.last_seq })
-    } catch { /* a dead session shouldn't sink the whole check */ }
+      const ob = await api.listOutbound(auth!.accessToken)
+      for (const o of ob.connections) {
+        if (o.new_count > 0) outbound.push({ conversation: o.connection_id, peer: o.peer_name ?? null, new_count: o.new_count })
+      }
+    } catch { /* outbound is optional in the scan */ }
   }
   result.outbound = outbound
   result.next_step = loggedIn
-    ? "`check` is the SINGLE complete scan — new messages + escalations + the brain's notices, all folded in (no separate `brain-pending` or `owner-channel` read needed). PRESENT IN TWO TIERS — never expand the whole pile at once.\n\nTIER 1 (THIS turn) — SUMMARY ONLY. Count the distinct items and give ONE numbered line each, BY FRIEND NAME, in the owner's language. NO raw message text, NO drafted replies, NO expanded content yet — just what each item is, in a few words. e.g. \"2 things need you — 1. 🔔 Robin: wants to book a call · 2. 💬 Alex: 3 new messages\". Then ask the owner to pick a number. If it's all quiet, say so in one line (you may still mention notices like \"✅ wrapped up with Sam\").\n\nTIER 2 (NEXT turn, after they pick a number) — open ONLY that one item: a SHORT summary of what it's about + its numbered actions. Show the actual exchange only if the owner then asks — and when you do, show BOTH sides (the friend's messages AND your agent's replies), readably, so it makes sense (summarize first, full back-and-forth later — never just the friend's half).\n\nBUILD the Tier-1 list in this ORDER, ONE line per DISTINCT item, DEDUPED by `connId` (an item in `needs_you` AND `inbound` is ONE line — surface as \"needs your OK\", never also as a new message): (1) `needs_you` = escalations the server HELD — resolve via `brain-resolve --request-id <id>` (sent/handed_off/declined); (2) `inbound.pending_requests` = people asking to connect (approve/reject); (3) `inbound.threads` held:false + unread_count>0 = new messages (`read --conversation <connection_id>`); (4) `notices` = the brain's narrative (🤝 new friend, ✅ wrapped up) — fold in as one-liners, don't expand; (5) `outbound[].new_messages` = replies on conversations the owner started; (6) `discovery.suggestion` = a NEW person the platform FOUND for the owner (discovery) — surface as ONE upbeat line by NAME, e.g. \"🎯 I found someone you might click with — <candidate_name>. Want to see?\"; on the owner's yes, run `discover` to present them (then Connect · next · Not now). Never show the score or ids. Never show raw ids/handles. Only if `needs_you` AND unread AND pending_requests are ALL empty is the queue clear (a `discovery` match or notices may still be worth a mention)."
+    ? "`check` is the SINGLE complete scan — new messages + escalations + the brain's notices, all folded in (no separate `brain-pending` or `owner-channel` read needed). PRESENT IN TWO TIERS — never expand the whole pile at once.\n\nTIER 1 (THIS turn) — SUMMARY ONLY. Count the distinct items and give ONE numbered line each, BY FRIEND NAME, in the owner's language. NO raw message text, NO drafted replies, NO expanded content yet — just what each item is, in a few words. e.g. \"2 things need you — 1. 🔔 Robin: wants to book a call · 2. 💬 Alex: 3 new messages\". Then ask the owner to pick a number. If it's all quiet, say so in one line (you may still mention notices like \"✅ wrapped up with Sam\").\n\nTIER 2 (NEXT turn, after they pick a number) — open ONLY that one item: a SHORT summary of what it's about + its numbered actions. Show the actual exchange only if the owner then asks — and when you do, show BOTH sides (the friend's messages AND your agent's replies), readably, so it makes sense (summarize first, full back-and-forth later — never just the friend's half).\n\nBUILD the Tier-1 list in this ORDER, ONE line per DISTINCT item, DEDUPED by `connId` (an item in `needs_you` AND `inbound` is ONE line — surface as \"needs your OK\", never also as a new message): (1) `needs_you` = escalations the server HELD — resolve via `brain-resolve --request-id <id>` (sent/handed_off/declined); (2) `inbound.pending_requests` = people asking to connect (approve/reject); (3) `inbound.threads` held:false + unread_count>0 = new messages (`read --conversation <connection_id>`); (4) `notices` = the brain's narrative (🤝 new friend, ✅ wrapped up) — fold in as one-liners, don't expand; (5) `outbound[]` = new replies on conversations the owner STARTED (`new_count` per item; open with `read --conversation <its conversation value>`); (6) `discovery.suggestion` = a NEW person the platform FOUND for the owner (discovery) — surface as ONE upbeat line by NAME, e.g. \"🎯 I found someone you might click with — <candidate_name>. Want to see?\"; on the owner's yes, run `discover` to present them (then Connect · next · Not now). Never show the score or ids. Never show raw ids/handles. Only if `needs_you` AND unread AND pending_requests are ALL empty is the queue clear (a `discovery` match or notices may still be worth a mention)."
     // LOGGED OUT: do NOT say "queue is clear" — inbound is invisible. Lead with the
     // login gap so a less-capable platform surfaces it instead of a false all-clear.
     : "NOT LOGGED IN — you can only see the owner's OUTBOUND conversations here (in `outbound`); their INBOUND (people who connected to them, requests, escalations) is INVISIBLE until they log in. Do NOT tell the owner their queue is clear. Tell them (in their language) you need a quick login to see incoming, then run `login` → `login --finish`. Still summarize anything in `outbound` if present."
@@ -1162,20 +1037,26 @@ async function cmdRequests(_flags: Record<string, string | true>) {
 }
 
 async function cmdListSessions() {
-  const all = await listSessions()
+  // Outbound conversations are server-side now — same data as `conversations` (outbound).
+  const auth = await loadAuth()
+  if (!auth?.agentId) {
+    return ok({ status: 'ok', sessions: [], next_step: 'Not logged in — log in to see reach-out conversations (`login` → `login --finish`).' })
+  }
+  const ob = await api.listOutbound(auth.accessToken)
   ok({
     status: 'ok',
-    sessions: all.map((s) => ({ conversation: s.handle, peer: s.peerAgentName ?? null, slug: s.slug, host: s.host, expires_at: s.tokenExpiresAt, last_seq: s.lastSeq, created_at: s.createdAt })),
-    next_step: all.length === 0
-      ? 'No outbound conversations the owner started. Tell them (in their language) there are none; use `connect --invite <link>` to reach out.'
-      : "Conversations the owner started (reached out). Summarize BY PEER NAME in their language (never the handle). `read --conversation <conversation>` to see one; `send` to reply. `expires_at` is just the rotating session key (auto-refreshed) — never tell the owner a conversation 'expired'.",
+    sessions: ob.connections.map((o) => ({ conversation: o.connection_id, peer: o.peer_name ?? null, status: o.status, conversation_id: o.conversation_id, new_count: o.new_count, created_at: o.created_at })),
+    next_step: ob.connections.length === 0
+      ? 'No outbound conversations the owner started. Tell them (in their language) there are none; use `connect` to reach out.'
+      : "Conversations the owner started (reached out). Summarize BY PEER NAME in their language (never the handle). `read --conversation <conversation>` to see one; `send` to reply. (Conversations are permanent — never tell the owner one 'expired'.)",
   })
 }
 
 async function cmdForgetSession(flags: Record<string, string | true>) {
+  // Legacy: outbound conversations no longer live in a local session. To actually end
+  // one, use `disconnect`; this is now a no-op kept for backward compatibility.
   const handle = requireString(flags, 'conversation', 'forget-session')
-  await deleteSession(handle)
-  ok({ status: 'ok', forgot: handle })
+  ok({ status: 'ok', forgot: handle, note: 'Reach-out conversations are server-side now — there is no local session to forget. To end a connection, use `disconnect`.' })
 }
 
 
@@ -1259,26 +1140,13 @@ async function cmdDiscover(flags: Record<string, string | true>) {
           : `Couldn't connect (${r.error}${r.reason ? ': ' + r.reason : ''}). Tell the owner in their language (plain words, no error codes); offer \`discover --next\` for another. 1. 🔭 Try another · 2. 🏠 Home`,
       })
     }
-    // Instant connect → PERSIST a local session from the returned token bundle
-    // (same as `connect`), so the owner can message the new friend right away.
-    let handle: string | undefined
-    if (r.connect_status === 'active' && r.session && r.slug) {
-      try {
-        handle = await persistSession(
-          {
-            status: 'active',
-            token: r.session.token,
-            token_expires_at: r.session.token_expires_at,
-            client_secret: r.session.client_secret,
-            your_user_id: r.session.your_user_id,
-            conversation_id: r.session.conversation_id,
-            peer_name: r.session.peer_name ?? r.candidate_name,
-          } as api.ConnectResponse,
-          r.slug,
-          api.getApiBase(),
-        )
-      } catch { /* session save best-effort — connection still exists server-side */ }
-    }
+    // Outbound conversations are server-side now (no local session). Use the
+    // connection_id as the handle if the accept response carries one; otherwise the
+    // owner reaches the new friend via `conversations`.
+    const handle: string | undefined =
+      (r as { connection_id?: string }).connection_id
+      ?? (r.session as { connection_id?: string } | undefined)?.connection_id
+      ?? undefined
     return ok({
       status: 'ok', connected: true, connect_status: r.connect_status, candidate_name: r.candidate_name,
       conversation: handle,

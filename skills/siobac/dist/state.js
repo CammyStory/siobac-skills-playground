@@ -375,71 +375,16 @@ export async function isAuthFileWriteable() {
         return { ok: false, reason: e.message };
     }
 }
-// ── Reach-out sessions (active connections this agent started) ───────────
-// Stored alongside auth.json in the SAME state dir (the merged skill keeps one
-// home). A session holds the per-connection bearer (xext_) for /message+/poll.
-// Ported from ovoclaw-connect when the skills merged.
-function sessionsFile() { return join(dir(), 'sessions.json'); }
-const SESSION_HANDLE_RE = /^s_[0-9a-f]{16}$/;
-function isValidHandle(h) { return SESSION_HANDLE_RE.test(h); }
-async function readSessions() {
-    try {
-        const raw = await fs.readFile(sessionsFile(), 'utf8');
-        const parsed = JSON.parse(raw);
-        return typeof parsed === 'object' && parsed !== null ? parsed : {};
-    }
-    catch (e) {
-        if (e.code === 'ENOENT')
-            return {};
-        throw e;
-    }
-}
-async function writeSessions(data) {
-    await ensureDir();
-    const f = sessionsFile();
-    await fs.writeFile(f, JSON.stringify(data, null, 2), { mode: 0o600 });
-    try {
-        await fs.chmod(f, 0o600);
-    }
-    catch { }
-}
-export async function saveSession(s) {
-    if (!isValidHandle(s.handle))
-        throw new Error(`saveSession: invalid handle ${JSON.stringify(s.handle)}`);
-    const all = await readSessions();
-    all[s.handle] = s;
-    await writeSessions(all);
-}
-export async function getSession(handle) {
-    if (!isValidHandle(handle))
-        return null;
-    const all = await readSessions();
-    return Object.prototype.hasOwnProperty.call(all, handle) ? all[handle] : null;
-}
-export async function listSessions() {
-    const all = await readSessions();
-    return Object.entries(all).filter(([k]) => isValidHandle(k)).map(([, v]) => v);
-}
-export async function deleteSession(handle) {
-    if (!isValidHandle(handle))
-        return;
-    const all = await readSessions();
-    if (!Object.prototype.hasOwnProperty.call(all, handle))
-        return;
-    delete all[handle];
-    await writeSessions(all);
-}
-export async function updateSession(handle, patch) {
-    if (!isValidHandle(handle))
-        return null;
-    const all = await readSessions();
-    if (!Object.prototype.hasOwnProperty.call(all, handle))
-        return null;
-    all[handle] = { ...all[handle], ...patch };
-    await writeSessions(all);
-    return all[handle];
-}
-export function newSessionHandle() { return 's_' + randomBytes(8).toString('hex'); }
+// ── Reach-out sessions: REMOVED ──────────────────────────────────────────
+// Reach-out (outbound) conversations used to be stored here as local sessions
+// (a per-connection xext_ bearer + client_secret in sessions.json). Login-only
+// made that vestigial: outbound conversations are now served server-side under
+// the owner's OAuth login, keyed by connection_id (see agents/outbound.service on
+// the server, and api.listOutbound/readOutbound/sendOutbound). No local session
+// state, no rotating token, no silent reauth — which removes the false
+// "session/conversation expired" churn. Legacy sessions.json (if present) is left
+// untouched; it's simply no longer read, and is cleaned up with the rest of the
+// state dir on logout/clear.
 // One-time migration after the ovoclaw → siobac rename: if the new ~/.siobac
 // state dir has no auth yet but the legacy ~/.ovoclaw equivalent does, copy the
 // login (auth/agent/sessions) over so the user stays logged in (no re-login

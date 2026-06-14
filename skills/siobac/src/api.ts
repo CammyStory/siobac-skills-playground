@@ -848,6 +848,52 @@ export async function pollConnectionReplies(host: string, token: string, sinceSe
   return inviteFetch<PollRepliesResponse>(`${host}/poll?${params.toString()}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } })
 }
 
+// ── Outbound (reach-out) conversations under the OWNER's login ──────────────
+// Replaces the old guest `xext_` sessions: a logged-in agent lists / reads / sends on
+// its OWN reach-out conversations via OAuth, keyed by connection_id (server:
+// agents/outbound.service). No per-conversation token, no local session, no reauth.
+export interface OutboundConnection {
+  connection_id: string
+  status: string
+  conversation_id: string | null
+  peer_name: string | null
+  peer_description: string | null
+  ice_break_closed: boolean
+  new_count: number
+  created_at: string
+  last_seen_at: string | null
+}
+export async function listOutbound(bearer: string): Promise<{ connections: OutboundConnection[] }> {
+  return jsonFetch<{ connections: OutboundConnection[] }>({ method: 'GET', path: '/agents/outbound', bearer })
+}
+export async function readOutbound(
+  bearer: string,
+  connectionId: string,
+  opts: { since?: number; limit?: number } = {},
+): Promise<ConversationHistory & { your_user_id: string | null }> {
+  const params = new URLSearchParams()
+  if (opts.since !== undefined) params.set('since', String(opts.since))
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit))
+  const qs = params.toString()
+  return jsonFetch<ConversationHistory & { your_user_id: string | null }>({
+    method: 'GET',
+    path: `/agents/outbound/${encodeURIComponent(connectionId)}/conversation${qs ? `?${qs}` : ''}`,
+    bearer,
+  })
+}
+export async function sendOutbound(
+  bearer: string,
+  connectionId: string,
+  content: string,
+): Promise<{ ok?: boolean; status?: string; kind?: string; message?: { id?: string; seq?: number }; reply_status?: string }> {
+  return jsonFetch({
+    method: 'POST',
+    path: `/agents/outbound/${encodeURIComponent(connectionId)}/message`,
+    bearer,
+    body: { content },
+  })
+}
+
 // Re-export the AuthState type for convenience in cli.ts.
 export type { AuthState }
 

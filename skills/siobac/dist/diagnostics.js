@@ -157,19 +157,20 @@ export async function cmdVerify(_flags) {
     catch (e) {
         checks.token_accepted = { ok: false, asserted: 'the server accepts the token and resolves this agent', reason: e.code ?? e.message };
     }
-    // 3. The agent is presentable — public profile + private directive set. Not
-    //    fatal, but sharing a blank agent is a real footgun, so warn.
+    // 3. The agent is presentable — a PUBLIC PROFILE is set. The private directive is
+    //    OPTIONAL (a unified default applies if the owner doesn't set one), so it no
+    //    longer gates readiness. Sharing a profile-less agent is the real footgun → warn.
     if (profile) {
-        const ready = profile.profile_complete && profile.directive_set;
+        const ready = profile.profile_complete;
         checks.profile_ready = {
             ok: true,
-            asserted: 'public profile + private directive are set, so the agent represents the owner',
+            asserted: 'a public profile is set, so the agent represents the owner',
             value: { profile_complete: profile.profile_complete, directive_set: profile.directive_set, is_new: profile.is_new },
-            warning: ready ? undefined : 'this agent is missing its profile and/or directive — set them before sharing so friends meet a real persona, not a blank one',
+            warning: ready ? undefined : 'this agent has no public profile — set one before sharing so friends meet a real persona, not a blank one',
         };
     }
     else {
-        checks.profile_ready = { ok: true, skipped: true, asserted: 'public profile + private directive are set', reason: 'skipped — token not accepted' };
+        checks.profile_ready = { ok: true, skipped: true, asserted: 'a public profile is set', reason: 'skipped — token not accepted' };
     }
     // 4. THE key product assertion: the share link the owner hands out actually
     //    resolves to THIS agent (round-trip the public manifest a friend hits).
@@ -248,8 +249,9 @@ export async function cmdVerify(_flags) {
 // ── Setup — the first-run onboarding state machine ───────────────────────
 // One explicit entry point for "where am I in setup, what's next" — instead of
 // the agent inferring readiness from scattered login/share output. Returns an
-// ordered checklist (login → profile → directive → share) with each step's done
-// state and the single next command. The agent gathers the missing content from
+// ordered checklist (login → name → profile → share) with each step's done
+// state and the single next command. (The private directive is OPTIONAL — a unified
+// default applies — so it is NOT a checklist step.) The agent gathers the content from
 // the owner (e.g. via AskUserQuestion) and runs that command. Read-only.
 export async function cmdSetup(_flags) {
     const auth = await loadAuth();
@@ -262,11 +264,10 @@ export async function cmdSetup(_flags) {
                 { step: 'login', done: false, label: 'Log in (bind this skill to your Siobac agent)', command: 'login' },
                 { step: 'name', done: false, label: 'Confirm the agent\'s name', command: 'set-profile --name "…"' },
                 { step: 'profile', done: false, label: 'Public profile (what others see)', command: 'set-profile --description "…"' },
-                { step: 'directive', done: false, label: 'Private directive (how you act on their behalf)', command: 'set-directive --content "…"' },
                 { step: 'share', done: false, label: 'Share (become reachable via QR/link)', command: 'share-self --confirmed' },
             ],
             next_action: 'login',
-            next_step: 'Tell the owner (in their language) you\'ll get them set up on Siobac, starting with a quick login. Then run `login` (two-step: `login`, then `login --finish` after the owner approves), then design in order — name → profile → directive — then `share-self`.',
+            next_step: 'Tell the owner (in their language) you\'ll get them set up on Siobac, starting with a quick login. Then run `login` (two-step: `login`, then `login --finish` after the owner approves), then set up in order — name → profile — then `share-self`. (Optional: private ground rules via `set-directive`; a sensible default applies if skipped.)',
         });
         return;
     }
@@ -307,7 +308,7 @@ export async function cmdSetup(_flags) {
             ok({
                 status: 'agent_missing', logged_in: true, agent_id: agentId,
                 reason: 'this login is bound to an agent that no longer exists (it was deleted).',
-                next_step: "The agent this login was bound to no longer exists — it was deleted, so there's nothing to set up here. Tell the owner (in their language), then either create a new agent in the OvOclaw app, or run `login` again and pick a DIFFERENT agent to manage. Do NOT keep retrying `setup`/`doctor` — the agent is gone, not unreachable.",
+                next_step: "The agent this login was bound to no longer exists — it was deleted, so there's nothing to set up here. Tell the owner (in their language), then either create a new agent in the Siobac app, or run `login` again and pick a DIFFERENT agent to manage. Do NOT keep retrying `setup`/`doctor` — the agent is gone, not unreachable.",
             });
             return;
         }
@@ -327,7 +328,6 @@ export async function cmdSetup(_flags) {
         { step: 'login', done: true, label: 'Logged in' },
         { step: 'name', done: nameConfirmed, label: 'Confirm the agent\'s name', command: 'set-profile --name "…"' },
         { step: 'profile', done: profile.profile_complete, label: 'Public profile (what others see)', command: 'set-profile --description "…"' },
-        { step: 'directive', done: profile.directive_set, label: 'Private directive (how you act on their behalf)', command: 'set-directive --content "…"' },
         { step: 'share', done: shared, label: 'Shared (reachable via QR/link)', command: 'share-self --confirmed' },
     ];
     const next = steps.find((s) => !s.done);
@@ -338,6 +338,6 @@ export async function cmdSetup(_flags) {
         next_action: next?.command ?? null,
         next_step: next
             ? `Next step — ${next.label}. Ask the owner for the content (AskUserQuestion is good for structured choices), then run \`${next.command}\`. Remaining steps follow in order; re-run \`setup\` to recheck.`
-            : 'Setup complete — tell the owner (in their language) they are all set: logged in, profile + directive set, and shared. Run `verify` anytime to confirm it all still works end-to-end.',
+            : 'Setup complete — tell the owner (in their language) they are all set: logged in, profile set, and shared. (Optional: fine-tune private ground rules with `set-directive`; a sensible default applies otherwise.) Run `verify` anytime to confirm it all still works end-to-end.',
     });
 }

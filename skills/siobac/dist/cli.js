@@ -184,15 +184,15 @@ async function cmdLoginFinish(_flags) {
         agent_is_new: prof ? prof.is_new : false,
         setup: prof
             ? (prof.is_new
-                ? { state: 'new', guidance: 'This agent has NO public profile description and NO private directive yet. Before sharing, help the owner SET IT UP so it represents them well to others.' }
-                : { state: 'existing', profile_complete: prof.profile_complete, directive_set: prof.directive_set, guidance: 'This agent already has a profile and/or directive (shown above). Show them to the owner and ASK whether to update either.' })
+                ? { state: 'new', guidance: 'New user — agent not set up yet. Lead with the simple product Welcome intro (scripts → Step 0b), NOT setup. Only walk setup (name → profile) if the owner chooses to start; the private directive is OPTIONAL (a default applies).' }
+                : { state: 'existing', profile_complete: prof.profile_complete, directive_set: prof.directive_set, guidance: 'This agent already has a profile (shown above). Show it to the owner and ASK whether to update it. (A private directive is optional — offer set-directive only if they want to fine-tune behavior.)' })
             : null,
         auto_go_online: true,
         next_step: prof
             ? (prof.is_new
-                ? 'This agent is NEW — not shared, and not designed yet, so NO ONE can reach it and there is nothing live to relay. Do NOT tell the owner they are "online". Lead with DESIGN, in THREE ordered steps (scripts → Step 1), adapting every example to the owner (never save a sample verbatim): (1) NAME — confirm or change the auto-assigned name via `set-profile --name "…"`; (2) PUBLIC profile — `set-profile --description "…"`; (3) PRIVATE directive (how it acts on their behalf) — `set-directive --content "…"`. THEN `share-self` for the QR/link. Only once SHARED does the server answer friends automatically and ESCALATE anything that commits the owner (meeting/money/scheduling/sensitive/off-directive/impersonation) — nothing to arm, it is server-driven (references/brain.md); after sharing, `pause` halts auto-replies and `go-online` resumes.'
-                : 'This agent is already designed and online by default — the SERVER answers friends automatically and ESCALATES anything that commits the owner (meeting/money/scheduling/sensitive/off-directive/impersonation) for approval. Nothing to arm — server-driven (references/brain.md). Relay the hub showing the current `profile`/`directive`; the owner can update them (`set-profile`/`set-directive`), `share-self`, `pause` (manual), or `go-online` (resume). Escalations surface in the inbox (`owner-channel` / `brain-pending`) to approve or decline.')
-            : 'Logged in. Relay the hub; if this is a new agent, lead with design (name → profile → directive) before sharing.',
+                ? 'This is a NEW user (agent_is_new) — first time here. Do NOT show the feature menu and do NOT push setup yet (that overwhelms a new user). FIRST relay the simple product INTRO from scripts → "Step 0b — Welcome (first-time user)": one short paragraph on what Siobac is + exactly two options (Let\'s go start · Tell me more), in the owner\'s language. When they proceed ("Let\'s go start" or after "Tell me more"), go to the HOME hub (scripts → "Step 0c") so they pick what to do — do NOT say they are "online" (nothing is shared yet); use the hub\'s not-yet-shared variant. Setup (name → profile, Step 1) is JUST-IN-TIME — it runs only when they pick Share (`share-self` gate) or Find, and needs just those TWO steps (the private directive is OPTIONAL — a default applies). Once shared, the server answers friends automatically (server-driven, references/brain.md).'
+                : 'Returning user (already designed). Relay the HOME hub from scripts → "Step 0c — post-login hub": the short numbered menu (what\'s new · share · reach out · find people · manage). Do NOT dump the profile/directive — they can pick "manage" to update. The server already answers friends in character and escalates commitments (server-driven, references/brain.md); `pause` (manual) / `go-online` (resume) steer it; escalations surface via `owner-channel` / `brain-pending`.')
+            : 'Logged in. If this is a new user (agent_is_new), relay the simple product intro (scripts → Step 0b — Welcome); otherwise relay the home hub (scripts → Step 0c).',
         remember: rememberLabel
             ? `You are now sharing the Siobac agent "${rememberLabel}" (id ${auth.agentId}). ` +
                 `Record this in your durable memory as your Siobac agent. Next time you log in, ` +
@@ -227,24 +227,24 @@ async function cmdShareSelf(flags) {
     const explicit = parseRequiresApproval(flags);
     const createApproval = explicit ?? false; // default: auto-accept
     const { auth, agentId } = await requireBoundAgent();
-    // ONBOARDING GATE (design-before-share): don't let an UNDESIGNED agent go live
-    // silently — a friend would otherwise reach an agent that doesn't know who it is.
-    // Detect a missing public profile and/or private rules and surface it for the owner.
+    // ONBOARDING GATE (design-before-share): don't let an agent with NO public profile
+    // go live silently — a friend would reach an agent that doesn't know who it is. The
+    // DIRECTIVE (ground rules) is OPTIONAL — the server applies a unified default — so a
+    // missing directive no longer counts as "undesigned" or blocks sharing.
     const design = await api.getAgentProfile(auth.accessToken, agentId).catch(() => null);
     const needsProfile = design ? !design.profile_complete : false;
-    const needsRules = design ? !design.directive_set : false;
-    const undesigned = needsProfile || needsRules;
-    const missing = [needsProfile ? 'a profile' : '', needsRules ? 'rules for how it acts' : ''].filter(Boolean).join(' and ');
+    const undesigned = needsProfile;
+    const missing = needsProfile ? 'a profile' : '';
     // CONSENT GATE — publishing the agent is outward-facing; confirm before it fires.
     if (!isConfirmed(flags)) {
         const policy = createApproval === false
             ? 'AUTO-ACCEPT — anyone with the link connects without your review (default; turn on with `set-approval --on`)'
             : 'approval required — you approve each new connection';
         needsConfirmation('share-self', { will: 'Publish this agent and produce a shareable QR/link anyone you give it to can use to reach you.', approval_policy: policy,
-            design_warning: undesigned ? `Not designed yet — missing ${missing}. Friends would reach an agent that doesn't know who it is. Recommend designing first (set-profile / set-directive).` : undefined }, undesigned
-            ? `Before I share you — you haven't set ${missing} yet, so friends would reach an agent that doesn't know who you are. Set ${needsProfile && needsRules ? 'those' : 'that'} up first, or share anyway?`
+            design_warning: undesigned ? `Not designed yet — missing ${missing}. Friends would reach an agent that doesn't know who it is. Recommend setting a profile first (set-profile).` : undefined }, undesigned
+            ? `Before I share you — you haven't set ${missing} yet, so friends would reach an agent that doesn't know who you are. Set that up first, or share anyway?`
             : `I'll publish you on Siobac and make a QR/link people can use to reach you (${createApproval === false ? 'auto-accepting new connections — you can switch to approval-required anytime with set-approval --on' : 'with your approval for each new connection'}). Want me to go ahead?`, undesigned
-            ? 'Design first: help the owner set the profile (set-profile --description "…") and rules (set-directive --content "…"). Only share anyway on a clear owner yes: share-self --confirmed'
+            ? 'Design first: help the owner set the profile (set-profile --description "…"). Only share anyway on a clear owner yes: share-self --confirmed'
             : 'share-self --confirmed (add --requires-approval if you want to approve each connection instead)');
     }
     let invite = await api.createShare(auth.accessToken, agentId, { requires_approval: createApproval });
@@ -278,7 +278,7 @@ async function cmdShareSelf(flags) {
             ? 'DISPLAY THE QR INLINE: render it as an image so the user sees a scannable QR, not a link — drop the ready-made `qr_markdown` straight into your reply (it is `![](qr_url)`). Also give `share_url` as a copyable link. Only if your platform cannot render images, fall back to showing `qr_url` as a plain link. (createInvite is idempotent — an already-shared agent returns its existing invite.) The link was VERIFIED to resolve to this agent.'
             : `CAUTION: the share was created but did NOT verify — the link did not resolve back to this agent (${verified.reason ?? 'unknown'}). Do NOT tell the owner it is ready. Re-run \`share-self\`, check connectivity with \`doctor\`, or run \`verify\` for detail before handing out the QR.`,
         next_step: linkWorks
-            ? 'If you have not already, help the owner DESIGN their agent so others understand who they are, in order: (1) confirm the NAME (`set-profile --name "…"`); (2) PUBLIC profile (`set-profile --description "…"`); (3) PRIVATE directive (`set-directive --content "…"` — the rules/purpose for how you reply on their behalf). Then, when a friend connects, use `recall` before replying and `remember` after (see Step 6 in references/guide.md, or run `guide --step serve_incoming`).'
+            ? 'If you have not already, help the owner set up their agent so others understand who they are: (1) confirm the NAME (`set-profile --name "…"`); (2) PUBLIC profile (`set-profile --description "…"`). That is all that is needed — the agent already replies in character with sensible default ground rules. OPTIONAL: if the owner wants to fine-tune how it acts on their behalf, they can set private ground rules with `set-directive --content "…"` (skippable). Then, when a friend connects, use `recall` before replying and `remember` after (see Step 6 in references/guide.md, or run `guide --step serve_incoming`).'
             : 'Share verification FAILED — resolve that first. Run `verify` for the full check, or `doctor` for connectivity, then `share-self` again. Do not surface the QR as working until `verified.share_resolves` and `verified.points_back` are both true.',
     });
 }
@@ -630,7 +630,7 @@ async function cmdSetDirective(flags) {
     await api.setDirective(auth.accessToken, agentId, content, ownerMsgSeq !== undefined ? Number(ownerMsgSeq) : undefined);
     ok({
         status: 'ok', agent_id: agentId, updated: true,
-        next_step: 'Private directive saved — tell the owner (in their language) their rules are saved. Design order is NAME → profile → rules → share: if the name isn\'t confirmed yet, do `set-profile --name "…"`; if the PUBLIC profile description is empty, set it with `set-profile --description "…"`. When all reflect the owner, run `share-self`.',
+        next_step: 'Private ground rules saved — tell the owner (in their language) their rules are saved (this was an OPTIONAL fine-tune; the agent works on a sensible default without it). The only required setup is NAME → profile → share: if the name isn\'t confirmed yet, do `set-profile --name "…"`; if the PUBLIC profile description is empty, set it with `set-profile --description "…"`; then run `share-self`.',
     });
 }
 // Show the agent's own profile (public card) + directive + setup state.
@@ -646,8 +646,8 @@ async function cmdGetProfile(_flags) {
         profile_complete: p.profile_complete,
         directive_set: p.directive_set,
         next_step: p.is_new
-            ? "This agent is NEW. Tell the owner (in their language) it's online by default once shared, then DESIGN it in THREE steps (scripts → Step 1): (1) NAME — confirm or change the auto-name via `set-profile --name \"…\"`; (2) public profile `set-profile --description \"…\"`; (3) private directive `set-directive --content \"…\"`. If you show an example, ADAPT it to the owner — never save the sample as-is. Then `share-self` for the QR/link."
-            : "Show the owner (in their language) their current NAME + profile + directive and ask if they want to change any (`set-profile --name` / `set-profile --description` / `set-directive`) — never overwrite silently. The server already auto-replies in character from these; they can `share-self`, `pause`, or `go-online`.",
+            ? "This agent is NEW. Tell the owner (in their language) it's online by default once shared, then set it up in TWO steps (scripts → Step 1): (1) NAME — confirm or change the auto-name via `set-profile --name \"…\"`; (2) public profile `set-profile --description \"…\"`. If you show an example, ADAPT it to the owner — never save the sample as-is. That's enough to `share-self` for the QR/link. OPTIONAL: ground rules for how it acts on their behalf — `set-directive --content \"…\"` — but a sensible default already applies, so this is skippable."
+            : "Show the owner (in their language) their current NAME + profile and ask if they want to change either (`set-profile --name` / `set-profile --description`) — never overwrite silently. The server already auto-replies in character; they can `share-self`, `pause`, or `go-online`. OPTIONAL: fine-tune private ground rules with `set-directive` if they ask (a default applies otherwise).",
     });
 }
 // Owner edits the PUBLIC profile (name/description) — what others read.
@@ -672,8 +672,8 @@ async function cmdSetProfile(flags) {
         // Design order is NAME → PUBLIC profile → PRIVATE directive → share. Point at the
         // next unfinished step so set-profile keeps the same flow as login/setup/guide.
         next_step: (name !== undefined && description === undefined)
-            ? 'Name confirmed — tell the owner (in their language) their agent\'s name is set. Next, the PUBLIC profile: `set-profile --description "…"` (who they are / what they discuss). Then the PRIVATE directive `set-directive --content "…"`, and finally `share-self`.'
-            : 'Public profile updated — tell the owner (in their language) their profile is saved. Design order is NAME → profile → rules → share: if the name isn\'t confirmed yet, do `set-profile --name "…"`; if the private DIRECTIVE isn\'t set, do `set-directive --content "…"`. Once all reflect the owner, run `share-self`.',
+            ? 'Name confirmed — tell the owner (in their language) their agent\'s name is set. Next, the PUBLIC profile: `set-profile --description "…"` (who they are / what they discuss). That\'s enough to `share-self`. (Optional: private ground rules via `set-directive` — a default applies if skipped.)'
+            : 'Public profile updated — tell the owner (in their language) their profile is saved. Setup order is NAME → profile → share: if the name isn\'t confirmed yet, do `set-profile --name "…"`; otherwise run `share-self`. (Optional: fine-tune private ground rules with `set-directive`; a sensible default applies otherwise.)',
     });
 }
 // ── Reach out + unified conversations (merged from ovoclaw-connect) ──────
@@ -849,8 +849,23 @@ async function cmdConversations(_flags) {
             conversations.push({ conversation: c.id, direction: 'inbound', started: 'they connected to me', peer: c.shadow_name ?? null, status: c.status, conversation_id: c.conversation_id, created_at: c.created_at });
         }
     }
+    // Collapse outbound sessions to ONE per peer. Reconnecting to a friend (or the
+    // ~hourly token re-auth) writes a NEW session row each time, so the raw list
+    // balloons — a real run showed 8 stale rows for a single friend. Keep only the
+    // FRESHEST session per peer (by createdAt); the older/expired duplicates are
+    // dropped. A still-expired freshest is kept (the connection re-auths on use) but
+    // flagged needs_reauth so it's not mistaken for a dead thread.
+    const freshestByPeer = new Map();
     for (const s of await listSessions()) {
-        conversations.push({ conversation: s.handle, direction: 'outbound', started: 'I connected out', peer: s.peerAgentName ?? null, slug: s.slug, host: s.host, created_at: s.createdAt, token_expires_at: s.tokenExpiresAt });
+        const key = s.peerAgentName || s.slug || s.handle; // group by FRIEND, not by session/slug
+        const cur = freshestByPeer.get(key);
+        if (!cur || new Date(s.createdAt).getTime() > new Date(cur.createdAt).getTime())
+            freshestByPeer.set(key, s);
+    }
+    const outbound = [...freshestByPeer.values()].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    for (const s of outbound) {
+        const expired = !!s.tokenExpiresAt && new Date(s.tokenExpiresAt).getTime() < Date.now();
+        conversations.push({ conversation: s.handle, direction: 'outbound', started: 'I connected out', peer: s.peerAgentName ?? null, slug: s.slug, host: s.host, created_at: s.createdAt, token_expires_at: s.tokenExpiresAt, ...(expired ? { needs_reauth: true } : {}) });
     }
     const loggedIn = !!(auth && auth.agentId);
     ok({
@@ -876,7 +891,7 @@ async function cmdRead(flags) {
             ok({
                 status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null,
                 messages: res.messages, last_seq: res.last_seq, has_more_before: typeof earliest === 'number' && earliest > 1,
-                next_step: 'Forward page from `--since` (both directions; `outbound` = the owner\'s own). Summarize anything new for the owner in their language — never echo raw messages or the handle. Page again with the returned `last_seq`. To reply, `send --conversation ' + handle + ' --message "<text>"`.',
+                next_step: 'Forward page from `--since` (both directions; `outbound` = the owner\'s own). Show the owner BOTH sides — what the FRIEND said AND what your agent REPLIED — so it reads as a real back-and-forth; never just the inbound half. Render it readably in their language (who said what), not raw JSON or the handle. Page again with the returned `last_seq`. To reply, `send --conversation ' + handle + ' --message "<text>"`.',
             });
         }
         // Default: the server caps each /poll window and reports `last_seq` as the
@@ -902,7 +917,7 @@ async function cmdRead(flags) {
             status: 'ok', conversation: handle, direction: 'outbound', peer: sess.peerAgentName ?? null,
             messages: recent, last_seq: all.length ? all[all.length - 1].seq : 0,
             has_more_before: typeof earliest === 'number' && earliest > 1,
-            next_step: 'Most recent window (both directions; `outbound` = the owner\'s own). Summarize for the owner in their language — never echo raw messages or the handle. If `has_more_before`, older messages exist (page with `--since <seq>`). To reply, `send --conversation ' + handle + ' --message "<text>"` (the server usually auto-replies when online, so only send if the owner wants to).',
+            next_step: 'Most recent window (both directions; `outbound` = the owner\'s own). When the owner opens a thread, show BOTH sides of the exchange — what the FRIEND said AND what your agent REPLIED on their behalf — so the meaning is clear in context; never show only the friend\'s half. Render it readably in their language (who said what), not raw JSON or the handle. If `has_more_before`, older messages exist (page with `--since <seq>`). To reply, `send --conversation ' + handle + ' --message "<text>"` (the server usually auto-replies when online, so only send if the owner wants to).',
         });
     }
     const { auth, agentId } = await requireBoundAgent();
@@ -1035,7 +1050,7 @@ async function cmdCheck(_flags) {
     }
     result.outbound = outbound;
     result.next_step = loggedIn
-        ? "`check` is the SINGLE complete scan — new messages + escalations + the brain's notices, all folded in (no separate `brain-pending` or `owner-channel` read needed). PRESENT IN TWO TIERS — never expand the whole pile at once.\n\nTIER 1 (THIS turn) — SUMMARY ONLY. Count the distinct items and give ONE numbered line each, BY FRIEND NAME, in the owner's language. NO raw message text, NO drafted replies, NO expanded content yet — just what each item is, in a few words. e.g. \"2 things need you — 1. 🔔 Robin: wants to book a call · 2. 💬 Alex: 3 new messages\". Then ask the owner to pick a number. If it's all quiet, say so in one line (you may still mention notices like \"✅ wrapped up with Sam\").\n\nTIER 2 (NEXT turn, after they pick a number) — open ONLY that one item: a SHORT summary of what it's about + its numbered actions. Show the actual message TEXT only if the owner then asks to see it (summarize first, transcript later).\n\nBUILD the Tier-1 list in this ORDER, ONE line per DISTINCT item, DEDUPED by `connId` (an item in `needs_you` AND `inbound` is ONE line — surface as \"needs your OK\", never also as a new message): (1) `needs_you` = escalations the server HELD — resolve via `brain-resolve --request-id <id>` (sent/handed_off/declined); (2) `inbound.pending_requests` = people asking to connect (approve/reject); (3) `inbound.threads` held:false + unread_count>0 = new messages (`read --conversation <connection_id>`); (4) `notices` = the brain's narrative (🤝 new friend, ✅ wrapped up) — fold in as one-liners, don't expand; (5) `outbound[].new_messages` = replies on conversations the owner started; (6) `discovery.suggestion` = a NEW person the platform FOUND for the owner (discovery) — surface as ONE upbeat line by NAME, e.g. \"🎯 I found someone you might click with — <candidate_name>. Want to see?\"; on the owner's yes, run `discover` to present them (then Connect · next · Not now). Never show the score or ids. Never show raw ids/handles. Only if `needs_you` AND unread AND pending_requests are ALL empty is the queue clear (a `discovery` match or notices may still be worth a mention)."
+        ? "`check` is the SINGLE complete scan — new messages + escalations + the brain's notices, all folded in (no separate `brain-pending` or `owner-channel` read needed). PRESENT IN TWO TIERS — never expand the whole pile at once.\n\nTIER 1 (THIS turn) — SUMMARY ONLY. Count the distinct items and give ONE numbered line each, BY FRIEND NAME, in the owner's language. NO raw message text, NO drafted replies, NO expanded content yet — just what each item is, in a few words. e.g. \"2 things need you — 1. 🔔 Robin: wants to book a call · 2. 💬 Alex: 3 new messages\". Then ask the owner to pick a number. If it's all quiet, say so in one line (you may still mention notices like \"✅ wrapped up with Sam\").\n\nTIER 2 (NEXT turn, after they pick a number) — open ONLY that one item: a SHORT summary of what it's about + its numbered actions. Show the actual exchange only if the owner then asks — and when you do, show BOTH sides (the friend's messages AND your agent's replies), readably, so it makes sense (summarize first, full back-and-forth later — never just the friend's half).\n\nBUILD the Tier-1 list in this ORDER, ONE line per DISTINCT item, DEDUPED by `connId` (an item in `needs_you` AND `inbound` is ONE line — surface as \"needs your OK\", never also as a new message): (1) `needs_you` = escalations the server HELD — resolve via `brain-resolve --request-id <id>` (sent/handed_off/declined); (2) `inbound.pending_requests` = people asking to connect (approve/reject); (3) `inbound.threads` held:false + unread_count>0 = new messages (`read --conversation <connection_id>`); (4) `notices` = the brain's narrative (🤝 new friend, ✅ wrapped up) — fold in as one-liners, don't expand; (5) `outbound[].new_messages` = replies on conversations the owner started; (6) `discovery.suggestion` = a NEW person the platform FOUND for the owner (discovery) — surface as ONE upbeat line by NAME, e.g. \"🎯 I found someone you might click with — <candidate_name>. Want to see?\"; on the owner's yes, run `discover` to present them (then Connect · next · Not now). Never show the score or ids. Never show raw ids/handles. Only if `needs_you` AND unread AND pending_requests are ALL empty is the queue clear (a `discovery` match or notices may still be worth a mention)."
         // LOGGED OUT: do NOT say "queue is clear" — inbound is invisible. Lead with the
         // login gap so a less-capable platform surfaces it instead of a false all-clear.
         : "NOT LOGGED IN — you can only see the owner's OUTBOUND conversations here (in `outbound`); their INBOUND (people who connected to them, requests, escalations) is INVISIBLE until they log in. Do NOT tell the owner their queue is clear. Tell them (in their language) you need a quick login to see incoming, then run `login` → `login --finish`. Still summarize anything in `outbound` if present.";
@@ -1072,7 +1087,7 @@ async function cmdForgetSession(flags) {
 // only: toggles directory membership, confirms the purpose (a SCRIPT, not a
 // form), shows the SINGLE best match, and connects (reusing the connect flow,
 // honouring the candidate's requires_approval). Spec: docs/discovery-match-core.md.
-const KEEP_LOOKING = "No strong match right now. Tell the owner ONE line (in their language): \"No strong match right now — I'll keep looking and check with you next time.\" Do NOT dead-end or list weak options; their purpose stays active and the server re-checks when new people appear.";
+const KEEP_LOOKING = "No strong match right now — make this WARM, not a dead-end. Tell the owner ONE line in their language: \"No one who really fits yet — I'll keep an eye out and ping you the moment someone does.\" If this looks like their FIRST try or the network is quiet, set expectations gently (\"it's still early here, so give it a little time\"). Their purpose stays active and the server re-checks as new people join. Offer only: 1. 🏠 Home — never list weak matches or re-ask the purpose.";
 function matchNextStep(s) {
     return (`Present THIS ONE match to the owner (in their language), using the present-match SCRIPT ` +
         `(references/scripts-en.md / scripts-cn.md). Lead with the candidate NAME ("${s.candidate_name}") and the ` +
@@ -1131,8 +1146,8 @@ async function cmdDiscover(flags) {
             return ok({
                 status: 'ok', connected: false, error: r.error, reason: r.reason,
                 next_step: r.error === 'no_active_suggestion'
-                    ? "There's no match on the table to connect. Run `discover` to see if one is ready."
-                    : `Couldn't connect (${r.error}${r.reason ? ': ' + r.reason : ''}). Tell the owner (in their language); they can try \`discover --next\` for another.`,
+                    ? "That match isn't on the table anymore (it expired, or you're already connected) — say it warmly, not as an error: \"That one's no longer available — want me to look for someone else?\" 1. 🔭 Find another (`discover`) · 2. 🏠 Home"
+                    : `Couldn't connect (${r.error}${r.reason ? ': ' + r.reason : ''}). Tell the owner in their language (plain words, no error codes); offer \`discover --next\` for another. 1. 🔭 Try another · 2. 🏠 Home`,
             });
         }
         // Instant connect → PERSIST a local session from the returned token bundle

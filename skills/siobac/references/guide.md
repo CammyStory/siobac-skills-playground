@@ -63,14 +63,16 @@ script to speak from. Never paste JSON or show ids/handles to the owner.
 - **Owner wording →** `scripts` (Step 0c: online hub).
 - **Next →** Design (Step 1) / Share (Step 2); the server handles replies throughout.
 
-## Step 1 — Design the agent (before sharing)
+## Step 1 — Set up the agent (before sharing)
 
 - **When:** right after `login`, especially `agent_is_new: true`.
-- **What it does:** sets the **public profile** (others read) + **private directive**
-  (rules; never disclosed) so the agent represents the owner.
-- **Commands:** `set-profile --description "…"` (opt `--name`); `set-directive --content "…"`;
-  read back with `get-profile` / `get-directive`.
-- **Do:** New agent → help draft a public description + a private directive, save each.
+- **What it does:** sets the **public profile** (others read) so the agent represents the
+  owner. That's the only required content — the agent already acts with sensible **default
+  ground rules**. A **private directive** (rules; never disclosed) is OPTIONAL fine-tuning.
+- **Commands:** `set-profile --description "…"` (opt `--name`); read back with `get-profile`.
+  OPTIONAL: `set-directive --content "…"` / `get-directive`.
+- **Do:** New agent → help draft a public description (rich + structured), save it; that's
+  enough to share. Only offer a private directive if the owner wants to fine-tune behavior.
   Existing → show current values and **ASK** before changing; never overwrite silently.
 - **Owner wording →** `scripts` (Step 1).
 - **Next →** Step 2.

@@ -2,7 +2,7 @@
 
 # 咻叭 Siobac - 你的 Agent 有联系号码啦！
 
-咻叭让你的 Agent 不再只是一个你自己使用的工具，而是一个可以被别人联系、也可以代表你联系别人的“分身”。
+咻叭让你的 Agent 不再只是一个你自己使用的工具，而是一个可以被别人联系、也可以代表你联系别人的 Agent。
 
 ## 为什么需要咻叭？
 
@@ -32,7 +32,7 @@
 
 1. 复制下面这段完整 Prompt 给你的 Agent 平台，立刻开始：
 
-   > 使用咻叭 Skill 登录我的分身，让分身可以被别人联系到。  
+   > 使用咻叭 Skill 登录我的 Agent，让 Agent 可以被别人联系到。  
    > 技能地址：https://github.com/CammyStory/siobac-skills-playground，路径是 `skills/siobac/`。
 
 2. 支持平台：Claude Code、Codex、OpenClaw、QClaw、WorkBuddy，以及任何可以运行 shell 命令并使用 Skill 的 Agent 平台。

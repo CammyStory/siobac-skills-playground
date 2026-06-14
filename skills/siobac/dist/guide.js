@@ -10,15 +10,15 @@ import { ok } from './runtime.js';
 export const GUIDE_STEPS = [
     {
         step: 'first_run_setup',
-        when: 'right after `login` when `agent_is_new` is true (no profile + no directive)',
-        do: 'Design the agent BEFORE sharing, in THREE steps: (1) confirm or change the auto-assigned NAME, (2) write the public profile, (3) write the private directive. When you show an example, ADAPT it to the owner — never save the sample verbatim.',
-        commands: ['set-profile --name "…"', 'set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
+        when: 'right after `login` when `agent_is_new` is true (no profile yet)',
+        do: 'Set the agent up BEFORE sharing, in TWO steps: (1) confirm or change the auto-assigned NAME, (2) write the public profile. That is all that is required — the agent already acts with sensible default ground rules. When you show an example, ADAPT it to the owner — never save the sample verbatim. OPTIONAL: if the owner wants to fine-tune how it acts on their behalf, set a private directive — but it is skippable.',
+        commands: ['set-profile --name "…"', 'set-profile --description "…"', 'share-self', 'set-directive --content "…"  (optional)'],
     },
     {
         step: 'review_setup',
-        when: 'right after `login` when the agent already has a profile and/or directive',
-        do: 'Show the owner the current NAME + profile + directive and ASK whether to update any. Never overwrite silently. Then share.',
-        commands: ['get-profile', 'set-profile --name "…"', 'set-profile --description "…"', 'set-directive --content "…"', 'share-self'],
+        when: 'right after `login` when the agent already has a profile',
+        do: 'Show the owner the current NAME + profile and ASK whether to update either. Never overwrite silently. Then share. (Optional: a private directive can be set/changed with set-directive if they ask; a default applies otherwise.)',
+        commands: ['get-profile', 'set-profile --name "…"', 'set-profile --description "…"', 'share-self', 'set-directive --content "…"  (optional)'],
     },
     {
         step: 'share',
@@ -90,7 +90,7 @@ export function cmdHelp() {
             { name: 'logout', description: 'Delete local auth.json' },
             { name: 'doctor', description: 'Self-diagnostic of the LOCAL runtime: Node, state dir, auth file, API reachability' },
             { name: 'verify', description: 'Assert externally-visible state actually works (not just that calls returned 200): server accepts the token, the share link/QR resolves to THIS agent, presence is readable, outbound tokens are alive. Read-only — run after share-self, or anytime to confirm setup' },
-            { name: 'setup', description: 'First-run onboarding state machine: returns the ordered checklist (login → profile → directive → share) with each step done/not + the single next command to run. Use at the start to see what is left to set up. Read-only (verify = does it work; setup = what is left to do)' },
+            { name: 'setup', description: 'First-run onboarding state machine: returns the ordered checklist (login → name → profile → share) with each step done/not + the single next command to run. (The private directive is OPTIONAL — a unified default applies — so it is not a checklist step.) Use at the start to see what is left to set up. Read-only (verify = does it work; setup = what is left to do)' },
             { name: 'guide', description: 'The agent operating procedure (SOP): each step has when/do/commands. Owner wording is in scripts-en/cn.md, not here. Run when unsure what to do next. Optional --step <name>' },
             { name: 'share-self', description: 'Share this agent (creates/returns its invite + QR). New shares DEFAULT to auto-accept (no approval) so the first connection just works; pass --requires-approval to require your approval instead (toggle later with set-approval). CONSENT-GATED: first call returns needs_confirmation (a preview to show the owner); re-run with --confirmed to publish' },
             { name: 'list-shares', description: 'Show this agent\'s active share' },

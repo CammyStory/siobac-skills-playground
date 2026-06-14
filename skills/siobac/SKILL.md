@@ -39,8 +39,12 @@ Siobac, not Siobac.
    **`next_step`** — that's *what to do* **and** *what to convey*.
 2. **Open the matching section in the scripts file** — `references/scripts-en.md`
    (or `references/scripts-cn.md` if the owner writes Chinese), by step name:
-   *Log in · Design · Share · Approve · Serve · Reach out · "what's new"*. It has an
-   example reply for exactly this situation.
+   *Log in · Welcome (first-time) · Home (post-login hub) · Design · Share · Approve ·
+   Serve · Reach out · "what's new"*. It has an example reply for exactly this situation.
+   **After `login --finish`:** a NEW user (`agent_is_new: true`) gets the simple product
+   intro (Welcome, Step 0b) — not the menu, not forced setup; a returning user gets the
+   Home hub (Step 0c). Profile setup is just-in-time (when they start or share); the
+   private directive is OPTIONAL (a sensible default applies if they skip it).
 3. **Adapt that script** to the live values (real name, real message, the options the
    `next_step` calls for) — **never paste JSON, never show ids/`conversation` handles.**
 4. **Send it short + human**, ending with **1–3 numbered options** when the owner has a

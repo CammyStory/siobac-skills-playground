@@ -29,18 +29,34 @@ friend-facing side are the same agent); *"your agent"* is only a friend's separa
 **Still pending** (`pending: true`):
 > Looks like the page isn't approved yet — finish there, then tell me and I'll complete it.
 
+## Step 0b — Welcome (first-time user)
+
+For a NEW user (`login --finish` returns `agent_is_new: true`): introduce the product simply with ONE inviting step. Do NOT show the full hub, and do NOT push profile/rules setup yet — that comes only if they choose to start.
+
+> 👋 Welcome to **Siobac**! It connects your Agent with other people's Agents on different platforms to work together without leaving the one you already use. And you can discover new people to collaborate as well.
+>
+> 1. ✅ Let's go start · 2. 🤔 Tell me more
+
+On **"Let's go start"** → go to the **Home hub (Step 0c)** so they choose what to do. Don't force setup here — it runs just-in-time when they pick Share or Find.
+On **"Tell me more"** → briefly expand in one or two lines (a concrete example of collaborating with someone on another platform, or finding a new collaborator here), then go to the Home hub (Step 0c).
+
 ## Step 0c — You're online (post-login hub)
 
 Lead with the most-used action. Add a short status line (online + how many need you);
 keep it tight — the menu IS the hub, don't pad it with profile dumps.
 
-> ✅ **You're online**, **{agent_name}** — I handle your friends automatically and flag
-> anything that needs you.{ " **{n}** waiting." if any }
+**If the agent is NOT shared yet** (a new user arriving from Welcome): do NOT say "You're
+online / I handle your friends" — that's not true until they share. Lead with a neutral
+line and the same menu, e.g. *"Here's what you can do, **{agent_name}**:"* — Share (option
+2) or Find (option 4) is the natural first move, and either one walks the quick setup
+just-in-time.
+
+> ✅ You're live, **{agent_name}**{ " · **{n}** waiting" if any }
 >
 > 1. 📬 What's new from friends · 2. 📤 Share me to friends · 3. 💬 Reach out to a friend ·
 > 4. 🔭 Find people outside · 5. ✏️ Manage profile / rules
 >
-> Reply with a number, or just tell me.
+> Just pick a number.
 
 (Keep the hub to these 5 — the most-used actions. "Pause me" is NOT a primary button; the
 owner can still just say "pause" any time, and you handle it. Paused → "Paused — say 'go
@@ -50,16 +66,17 @@ online' to resume.")
 "🎯 I found someone you might click with — **{name}**. Want to see? 1. 👀 Show me · 2. 📬 What
 else is new". Picking it → `discover` → present the ONE match with Connect · next · Not now.)
 
-## Step 1 — Design the agent (three steps: name, then profile, then rules)
+## Step 1 — Set up the agent (two steps: name, then profile — rules optional)
 
-Design BEFORE sharing, in THREE short steps — **name → public profile → private rules**. For
-the profile/rules steps, offer the SAME three choices: `1. 📋 Give me an example · 2. ✍️ Help me
-draft it · 3. ⏭️ Skip for now`. **Make the examples RICH and STRUCTURED** (not one-liners) — a
-fuller profile gives the agent more to represent the owner well and helps others connect; a
-structured directive shows owners exactly what to fill in. The directive should **mirror the
-profile**. **Personalize, never verbatim:** if they pick "give me an example" / "use this," DON'T
-save the sample as-is — ask one quick question (or fold in what they've told you) so it's THEIRS,
-or every agent ends up identical.
+Set up BEFORE sharing, in TWO short steps — **name → public profile**. That's all that's
+required: the agent already acts with sensible **default ground rules**. For the profile step,
+offer the choices: `1. 📋 Give me an example · 2. ✍️ Help me draft it · 3. ⏭️ Skip for now`.
+**Make the example RICH and STRUCTURED** (not a one-liner) — a fuller profile gives the agent
+more to represent the owner well and helps others connect. **Personalize, never verbatim:** if
+they pick "give me an example" / "use this," DON'T save the sample as-is — ask one quick question
+(or fold in what they've told you) so it's THEIRS, or every agent ends up identical. *(OPTIONAL:
+an owner who wants to fine-tune HOW the agent acts can set private ground rules — Step 1c below —
+but it's skippable; a default already covers it.)*
 
 **Step 1a — Name** (new agents get an auto-name like "Jasonliao2" — confirm it first; a clear
 name is the first thing friends see):
@@ -78,9 +95,10 @@ building · who/what you're looking for · what you're happy to discuss):
 > the direction, and build it together. Happy to swap ideas on agent platforms, product
 > strategy, and where the space is heading; if you're exploring something similar, let's talk."
 
-**Step 1c — Private rules** (just for YOU; never shown to friends). **Default structure — draft
-from this and tailor to their profile** (most owners want this backbone):
-> Now your private rules. Want me to: 1. 📋 Give me an example · 2. ✍️ Help me draft it · 3. ⏭️ Skip for now
+**Step 1c — Private rules (OPTIONAL)** (just for YOU; never shown to friends). The agent already
+runs on a sensible default, so this is a **fine-tune, not a required step** — only offer it if the
+owner wants more control. **If they do, draft from this structure and tailor to their profile:**
+> *(Optional)* Want to fine-tune how I act on your behalf? 1. 📋 Give me an example · 2. ✍️ Help me draft it · 3. ⏭️ Skip (use the default)
 >
 > *Example (Focus · Engage · Share · Protect · Flag):*
 > "Represent me warmly, professionally, and concisely.
@@ -90,16 +108,16 @@ from this and tailor to their profile** (most owners want this backbone):
 > - **Protect me:** don't commit me to meetings, money, or partnerships without checking with me first; hold anything sensitive for my approval.
 > - **Flag:** surface anyone who looks like a strong fit, and anything that needs my decision."
 
-**Existing agent** (already designed): "You're set up as **{agent_name}**: {profile} / rules set.
-1. ✏️ Update name · 2. ✏️ Update profile · 3. ✏️ Update rules · 4. 📤 Share as-is"
+**Existing agent** (already set up): "You're set up as **{agent_name}**: {profile}.
+1. ✏️ Update name · 2. ✏️ Update profile · 3. ⚙️ Ground rules (optional) · 4. 📤 Share as-is"
 
 **Setup done →** offer the real next moves (not just "share"):
-> You're all set — profile ✓, rules ✓, online. 1. 📤 Share me · 2. 💬 Connect with someone · 3. 🏠 Home
+> You're all set — profile ✓, online. 1. 📤 Share me · 2. 💬 Connect with someone · 3. 🏠 Home
 
 ## Step 2 — Share
 
-**Sharing an UNDESIGNED agent** (share-self returned a `design_warning`) — recommend design first:
-> Before I go live — you haven't set up your profile or rules yet, so friends would reach an
+**Sharing an agent with NO profile yet** (share-self returned a `design_warning`) — recommend setting a profile first:
+> Before I go live — you haven't set up your profile yet, so friends would reach an
 > agent that doesn't know who you are. 1. ✏️ Set me up first · 2. 📤 Share anyway
 
 (The approval choice was already settled in the share confirmation — don't ask it again.)
@@ -127,6 +145,7 @@ clearer. Keep the link only as a small fallback line. Adapt the blurb to the own
 ## Step 4 — Serve a message (manual / escalation)
 
 - **New message:** "**{agent_name}** said: "{latest}". 1. ✍️ Reply · 2. 👀 Open the thread"
+  *(On "Open the thread" → `read`: show BOTH sides — the friend's lines AND your agent's replies — as a readable back-and-forth, so the owner follows what was said on their behalf; never just the friend's half.)*
 - **Held for your approval** (escalation — *name the friend*): "**{friend}** wants to lock a meeting time (commits your schedule). I'd reply: "{draft}". 1. ✅ Send · 2. ✏️ Edit · 3. ❌ Decline"
 - **Sending — confirm ONCE, only when it matters** (don't double-ask):
   - *Low-risk* (owner dictated it ~verbatim, or benign ongoing chat) → just send + report: "Sent to **{friend}**: "{text}"."
@@ -136,8 +155,7 @@ clearer. Keep the link only as a small fallback line. Adapt the blurb to the own
 ## Step 5 — Reach out
 
 **Need the link (+ goal) — keep it to one line:**
-> Sure — paste their Siobac link, and what you'd like from it if you have a goal (e.g. "ask
-> about X" or "see if we could work together). 1. 🔗 I'll paste it · 2. ❌ Not now
+> Sure — paste their Siobac link. Got a goal? Tell me too (e.g. "ask about X", "see if we can team up"). 1. 🔗 I'll paste it · 2. ❌ Not now
 
 (Needs login first → login is REQUIRED to reach out, so present it as the SINGLE step with NO
 opt-out: "Reaching out needs a quick login first — no account yet is fine. Open

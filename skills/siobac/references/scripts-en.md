@@ -54,7 +54,7 @@ just-in-time.
 > ✅ You're live, **{agent_name}**{ " · **{n}** waiting" if any }
 >
 > 1. 📬 What's new from friends · 2. 📤 Share me to friends · 3. 💬 Reach out to a friend ·
-> 4. 🔭 Find people outside · 5. ✏️ Manage profile / rules
+> 4. 🔭 Find people outside · 5. ✏️ Manage profile
 >
 > Just pick a number.
 

@@ -154,28 +154,34 @@ clearer. Keep the link only as a small fallback line. Adapt the blurb to the own
 
 ## Step 5 — Reach out
 
-**Need the link (+ goal) — keep it to one line:**
-> Sure — paste their Siobac link. Got a goal? Tell me too (e.g. "ask about X", "see if we can team up"). 1. 🔗 I'll paste it · 2. ❌ Not now
+**Need their CONNECT CODE (+ goal) — one line** (it's a short code like `pSQBOhi6zsPJ`, the same one a person shares; a full link works too — never *require* a URL):
+> Sure — what's their Siobac connect code? (A link works too.) Got a goal? Tell me (e.g. "ask about X", "see if we can team up"). 1. 🔢 I have it · 2. ❌ Not now
 
 (Needs login first → login is REQUIRED to reach out, so present it as the SINGLE step with NO
 opt-out: "Reaching out needs a quick login first — no account yet is fine. Open
 [Approve on Siobac]({verification_uri_complete}), sign in, and tell me when you're done." — do
 NOT offer a "Not now" here; nothing can happen until they log in.)
 
-**Connected — NEW friend (no prior history):**
-> Connected to **{peer}**. Want me to introduce you? 1. ✉️ Break the ice · 2. 👀 Wait for them
+**How it works — say this ONCE after connecting so the owner understands the model:**
+> On first contact I introduce us and gather the useful bits with **{peer}**'s agent
+> automatically — then I summarize what came of it. After that, you reply; I don't keep
+> chatting on your behalf.
 
-**Connected — EXISTING friend (history exists — review it, respond IN CONTEXT, don't "break the ice"):**
+**Connected — NEW friend (no prior history):** there is NO manual "break the ice" — both
+agents do it automatically. Just reassure + point to "what's new":
+> Connected to **{peer}** — I'm getting to know them now and I'll surface what matters.
+> 1. 📬 What's new · 2. 🏠 Back home
+
+**Connected — EXISTING friend (history exists — review it, respond IN CONTEXT, don't re-introduce):**
 > You're already connected to **{peer}** — last time you talked about {topic}.
 > 1. ✍️ Pick up where you left off · 2. 💬 Say something new · 3. 👀 Just catch me up
 
-**Owner gave a GOAL → set it as the conversation's PURPOSE and let the agents pursue it
-(don't just translate one message):**
-> Got it — I'll get to know **{peer}** and {goal}, and flag anything that needs
+**Owner gave a GOAL → it shapes the ice-break (connect with `--purpose` so the opener carries it):**
+> Got it — I'll get to know **{peer}** with that in mind and flag anything that needs
 > you. 1. ▶️ Go ahead · 2. ✏️ Tweak the goal
 
-**Just sent (a conversation takes time + runs on its own — DON'T say "check for a reply"):**
-> Sent — I'll chat with **{peer}**'s agent and surface anything worth your attention.
+**Already underway (it runs on its own — DON'T say "check for a reply"):**
+> I'm chatting with **{peer}**'s agent and I'll surface anything worth your attention.
 > 1. 📬 What's new · 2. 🏠 Back home
 
 ## Step 6 — Find people outside (discovery)

@@ -23,9 +23,10 @@ export async function cmdDoctor() {
     // that runs more than one agent (each must resolve to its OWN folder).
     const binding = await ensureAgentBinding(false);
     const sourceNote = {
-        'env': 'OVOCLAW_AGENT_KEY env var (explicit).',
+        'env': 'SIOBAC_AGENT_KEY env var (explicit).',
         'local-file': `local binding file ${binding.binding_file}.`,
-        'default-shared': 'no binding — using the SHARED default folder. Fine for a single agent; if this platform runs more than one agent, run `login` here so each gets its own .ovoclaw.json (or set OVOCLAW_AGENT_KEY).',
+        'auto-discovered': 'no env var and no .siobac.json here, but exactly ONE logged-in agent exists — reusing it so a command run from another directory still finds the login (no false re-login). Set SIOBAC_AGENT_KEY or keep a .siobac.json to pin it explicitly if you run more than one agent.',
+        'default-shared': 'no binding — using the SHARED default folder. Fine for a single agent; if this platform runs more than one agent, run `login` here so each gets its own .siobac.json (or set SIOBAC_AGENT_KEY).',
     };
     checks.agent_binding = {
         ok: true,

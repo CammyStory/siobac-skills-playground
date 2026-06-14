@@ -1,4 +1,4 @@
-import { promises as fs, constants as fsConstants, readFileSync } from 'node:fs';
+import { promises as fs, constants as fsConstants, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -55,6 +55,27 @@ function findBindingFile() {
     }
     return null;
 }
+// FALLBACK when there's no env key and no .siobac.json binding: a command may run
+// from a DIFFERENT working directory than `login` did, so the binding walk finds
+// nothing and we'd otherwise read the EMPTY shared dir → a false "session expired"
+// / re-login even though the login is fine, just saved under a per-agent folder. So
+// auto-discover an existing login: if EXACTLY ONE ~/.siobac/agents/<key>/ holds an
+// auth.json (logout deletes it, so this = exactly one logged-in agent), use that key.
+// Zero or several (ambiguous) → caller's normal fallback; explicit env/binding always wins.
+function findSingleLoggedInAgent() {
+    try {
+        const agentsDir = join(STATE_BASE, 'agents');
+        if (!existsSync(agentsDir))
+            return null;
+        const keys = readdirSync(agentsDir, { withFileTypes: true })
+            .filter((e) => e.isDirectory() && existsSync(join(agentsDir, e.name, 'auth.json')))
+            .map((e) => e.name);
+        return keys.length === 1 ? sanitizeKey(keys[0]) : null;
+    }
+    catch {
+        return null;
+    }
+}
 // Once resolved (or created) within a process the key is PINNED, so every
 // command in the same run reads/writes the SAME folder — including the very run
 // of `login` that just created the binding file.
@@ -66,7 +87,9 @@ function resolveAgentKey() {
     if (env)
         return sanitizeKey(env);
     const bf = findBindingFile();
-    return bf ? bf.key : '';
+    if (bf)
+        return bf.key;
+    return findSingleLoggedInAgent() ?? '';
 }
 function stateDirFor(key) {
     return key ? join(STATE_BASE, 'agents', key) : STATE_BASE;
@@ -93,6 +116,15 @@ export async function ensureAgentBinding(create) {
     if (found) {
         _pinnedKey = found.key;
         return { key: found.key, source: 'local-file', binding_file: found.path, state_dir: stateDirFor(found.key), created: false };
+    }
+    // No binding in this cwd → reuse an EXISTING single login instead of reading the
+    // empty shared dir or minting a fresh empty agent. This is what stops a command run
+    // from a different working directory from falsely reporting "session expired" and
+    // re-logging-in (and `connect`/create from spawning a throwaway empty binding).
+    const existing = findSingleLoggedInAgent();
+    if (existing) {
+        _pinnedKey = existing;
+        return { key: existing, source: 'auto-discovered', binding_file: null, state_dir: stateDirFor(existing), created: false };
     }
     if (!create) {
         _pinnedKey = '';

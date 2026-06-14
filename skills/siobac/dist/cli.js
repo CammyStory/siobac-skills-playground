@@ -775,11 +775,13 @@ async function cmdInspectInvite(flags) {
 }
 async function cmdConnect(flags) {
     const invite = requireString(flags, 'invite', 'connect');
-    // --intro is OPTIONAL. The owner just pastes a link/QR; the share page never tells
-    // them to write an intro, so requiring one dead-ended first contact. Default to a
-    // neutral opener (the agent can still pass --intro to personalize). The peer's brain
-    // answers this first line, so a plain greeting works fine.
-    const introduction = optionalString(flags, 'intro') ?? "Hi! I'd like to connect.";
+    // --intro is OPTIONAL. The first message should CARRY MEANING, not be a content-free
+    // "hi" (that wastes the opening + reads as a double-hello before the real one). If the
+    // owner gave a --purpose, lead with it; otherwise a warm opener that invites substance.
+    // Both agents auto-ice-break from here, so this is just the seed line.
+    const purposeHint = optionalString(flags, 'purpose');
+    const introduction = optionalString(flags, 'intro')
+        ?? (purposeHint ? `Hi! I'd love to connect — ${purposeHint}.` : 'Hi! I’d love to connect and learn more about you.');
     const { slug, host } = parseInvite(invite);
     const auth = await loadAuth();
     const loggedIn = !!(auth && auth.agentId);
@@ -797,7 +799,7 @@ async function cmdConnect(flags) {
         your_agent_name: optionalString(flags, 'agent-name'),
         your_owner_name: optionalString(flags, 'owner-name'),
         introduction,
-        purpose_hint: optionalString(flags, 'purpose'),
+        purpose_hint: purposeHint,
     }, auth.accessToken));
     if (res.status === 'active' || res.status === 'reauthorized' || res.status === 'already_connected') {
         // Surface the friend's NAME + DESCRIPTION so the owner can be told WHO they reached AND
@@ -821,7 +823,7 @@ async function cmdConnect(flags) {
             : 'them';
         ok({
             status: res.status, conversation: handle, peer_name: res.peer_name ?? null, peer_description: peerDescription, mode: 'registered', token_expires_at: res.token_expires_at,
-            next_step: `Connected to ${who}. CONFIRM IT'S THE RIGHT PERSON FIRST: Siobac hides owner identity for privacy, so if the owner could know more than one "${res.peer_name ?? 'person'}", the name alone can't prove it's the intended one — tell them exactly who you reached (name${peerDescription ? ' + description' : ''}); if there's ANY doubt it's the right person, suggest they ask their friend to confirm they now see the owner's agent in their connections (a same-named stranger is otherwise silent). THEN check whether this is an existing friendship: \`read --conversation ${handle}\` — prior messages → summarize where things stand and respond IN CONTEXT (do NOT "break the ice"); brand-new → offer to introduce them. Tell the owner in their language; never show the \`conversation\` handle. END with 1–3 short NUMBERED options so they can reply by number. If the owner has a GOAL, treat it as the conversation's PURPOSE — confirm it, re-run \`connect\` with \`--purpose "<the goal>"\`, and let the agents auto-converse toward it. To send a specific line: \`send --conversation ${handle} --message "<text>"\`.`,
+            next_step: `Connected to ${who}. CONFIRM IT'S THE RIGHT PERSON FIRST: Siobac hides owner identity for privacy, so if the owner could know more than one "${res.peer_name ?? 'person'}", the name alone can't prove it — tell them exactly who you reached (name${peerDescription ? ' + description' : ''}); if there's ANY doubt, suggest they ask the friend to confirm they now see the owner's agent in their connections (a same-named stranger is otherwise silent). HOW IT WORKS NOW — tell the owner plainly: on first contact your agent and theirs AUTO-INTRODUCE and gather the useful bits (the ICE-BREAK), then I summarize what came of it in "what's new"; after that YOU reply — I don't keep chatting on your behalf. So for a BRAND-NEW friend there is NOTHING to send manually and NO "break the ice" step — the ice-break runs itself; just tell the owner you're getting to know ${res.peer_name ?? 'them'} and will surface what matters. For an EXISTING friendship, \`read --conversation ${handle}\` → summarize where things stand and respond IN CONTEXT (don't re-introduce). If the owner has a GOAL, it shapes the ice-break — confirm it and re-run \`connect\` with \`--purpose "<the goal>"\` so the opener carries it. Tell the owner in their language; never show the \`conversation\` handle; END with 1–3 short NUMBERED options. To send a specific line yourself: \`send --conversation ${handle} --message "<text>"\`.`,
         });
     }
     if (res.status === 'awaiting_approval') {
